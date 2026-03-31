@@ -24,11 +24,12 @@ if(EMSCRIPTEN)
     target_compile_definitions(pong_client PRIVATE PONG_WASM)
 
     set_target_properties(pong_client PROPERTIES
-            OUTPUT_NAME "pong"
+            OUTPUT_NAME "index"
             SUFFIX      ".html"
     )
 
     target_link_options(pong_client PRIVATE
+            "SHELL:--shell-file \"${CMAKE_SOURCE_DIR}/template.html\""
             "SHELL:-s USE_GLFW=3"
             "SHELL:-s ASYNCIFY"
             "SHELL:-s ALLOW_MEMORY_GROWTH=1"
