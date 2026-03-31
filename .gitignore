@@ -1,0 +1,10 @@
+build/
+.cache/
+compile_commands.json
+*.user
+.vs/
+*.suo
+*.sdf
+*.opensdf
+CMakeSettings.json
+.idea/
