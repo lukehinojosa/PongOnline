@@ -8,15 +8,13 @@
 #include <string>
 #include <unordered_map>
 
-// ── Lobby ─────────────────────────────────────────────────────
-// A lobby holds the host's WebSocket until a guest arrives.
-// Once both sides have exchanged SDP/ICE, the lobby is done.
+// Lobby
 
 struct Lobby {
     std::shared_ptr<rtc::WebSocket> host_ws;
 };
 
-static std::mutex                              g_mutex;
+static std::mutex g_mutex;
 static std::unordered_map<std::string, Lobby> g_lobbies;
 
 // Generate a random 6-character uppercase alphanumeric code.
@@ -25,17 +23,25 @@ static std::string make_code() {
     static std::mt19937 rng{ std::random_device{}() };
     static std::uniform_int_distribution<> dist(0, sizeof(chars) - 2);
     std::string code(6, ' ');
-    for (auto& c : code) c = chars[dist(rng)];
+    for (auto& c : code)
+        c = chars[dist(rng)];
     return code;
 }
 
 static void handle_client(std::shared_ptr<rtc::WebSocket> ws) {
     ws->onMessage([ws](rtc::message_variant data) {
-        if (!std::holds_alternative<std::string>(data)) return;
+        if (!std::holds_alternative<std::string>(data))
+            return;
 
         nlohmann::json msg;
-        try { msg = nlohmann::json::parse(std::get<std::string>(data)); }
-        catch (...) { return; }
+        try
+        {
+            msg = nlohmann::json::parse(std::get<std::string>(data));
+        }
+        catch (...)
+        {
+            return;
+        }
 
         const std::string type = msg.value("type", "");
 
@@ -44,7 +50,10 @@ static void handle_client(std::shared_ptr<rtc::WebSocket> ws) {
             std::string code;
             {
                 std::lock_guard lk(g_mutex);
-                do { code = make_code(); } while (g_lobbies.count(code));
+                do
+                {
+                    code = make_code();
+                } while (g_lobbies.count(code));
                 g_lobbies[code].host_ws = ws;
             }
             ws->send(nlohmann::json{ {"type","code"}, {"code", code} }.dump());
@@ -78,8 +87,7 @@ static void handle_client(std::shared_ptr<rtc::WebSocket> ws) {
             std::cout << "[signaling] guest joined lobby: " << code << "\n";
 
         } else if (type == "offer" || type == "answer" || type == "ice") {
-            // These are relayed by the per-lobby handler set up above.
-            // If they arrive here, the lobby setup hasn't happened yet — ignore.
+            // Lobby setup hasn't happened yet; ignore.
         }
     });
 
