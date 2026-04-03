@@ -8,12 +8,7 @@
 #include <memory>
 #include <vector>
 
-// ── JS bridge ─────────────────────────────────────────────────
-// All WebRTC and WebSocket calls are delegated to JavaScript via
-// EM_JS, since Emscripten has no native WebRTC API.
-//
-// The JS side manages a single global `pongTransport` object
-// and calls back into C++ via the exported functions at the bottom.
+// JS bridge
 
 EM_JS(void, js_transport_host, (const char* signaling_url), {
     const url = UTF8ToString(signaling_url);
@@ -28,7 +23,7 @@ EM_JS(void, js_transport_host, (const char* signaling_url), {
 });
 
 EM_JS(void, js_transport_join, (const char* signaling_url, const char* code), {
-    const url      = UTF8ToString(signaling_url);
+    const url = UTF8ToString(signaling_url);
     const joinCode = UTF8ToString(code);
     window._pongWS = new WebSocket(url);
     window._pongWS.binaryType = 'arraybuffer';
@@ -41,14 +36,18 @@ EM_JS(void, js_transport_join, (const char* signaling_url, const char* code), {
 });
 
 EM_JS(void, js_transport_send, (const uint8_t* data, int len), {
-    if (!window._pongDC || window._pongDC.readyState !== 'open') return;
+    if (!window._pongDC || window._pongDC.readyState !== 'open')
+        return;
     window._pongDC.send(HEAPU8.slice(data, data + len));
 });
 
 EM_JS(void, js_transport_close, (), {
-    if (window._pongDC)  window._pongDC.close();
-    if (window._pongPC)  window._pongPC.close();
-    if (window._pongWS)  window._pongWS.close();
+    if (window._pongDC)
+        window._pongDC.close();
+    if (window._pongPC)
+        window._pongPC.close();
+    if (window._pongWS)
+        window._pongWS.close();
 });
 
 // Install the JS signaling handler and DataChannel callbacks.
@@ -59,8 +58,8 @@ EM_JS(void, js_install_bridge, (), {
     window._pongSetupDC = (dc) => {
         window._pongDC = dc;
         dc.binaryType = 'arraybuffer';
-        dc.onopen    = () => { Module.ccall('wasm_on_open',    null, [], []); };
-        dc.onclose   = () => { Module.ccall('wasm_on_close',   null, [], []); };
+        dc.onopen = () => { Module.ccall('wasm_on_open', null, [], []); };
+        dc.onclose = () => { Module.ccall('wasm_on_close', null, [], []); };
         dc.onmessage = (e) => {
             const buf = new Uint8Array(e.data);
             const ptr = Module._malloc(buf.length);
@@ -131,8 +130,7 @@ EM_JS(void, js_install_bridge, (), {
     };
 });
 
-// ── C++ callbacks invoked from JS ────────────────────────────
-// These are called by the EM_JS code above via Module.ccall.
+// C++ callbacks invoked from JS
 
 namespace pong {
     // Single global transport pointer so the JS callbacks can reach it.
@@ -158,19 +156,18 @@ extern "C" {
     }
 }
 
-// ── WasmTransport ─────────────────────────────────────────────
+// WasmTransport
 namespace pong {
 
 class WasmTransport : public Transport {
 public:
-    WasmTransport()  { js_install_bridge(); g_transport = this; }
+    WasmTransport() { js_install_bridge(); g_transport = this; }
     ~WasmTransport() { if (g_transport == this) g_transport = nullptr; }
 
     void host(const std::string& signaling_url) override {
         js_transport_host(signaling_url.c_str());
     }
-    void join(const std::string& signaling_url,
-              const std::string& code) override {
+    void join(const std::string& signaling_url, const std::string& code) override {
         js_transport_join(signaling_url.c_str(), code.c_str());
     }
     void send(std::span<const uint8_t> data) override {

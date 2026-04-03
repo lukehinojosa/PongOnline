@@ -1,6 +1,6 @@
 #include "pong/transport.h"
 
-#ifndef PONG_WASM   // entire file excluded from WASM build
+#ifndef PONG_WASM
 
 #include <rtc/rtc.hpp>
 #include <nlohmann/json.hpp>
@@ -14,38 +14,40 @@ namespace pong {
 
 class NativeTransport : public Transport {
 public:
-    // ── Host ─────────────────────────────────────────────────
+    // Host
     void host(const std::string& signaling_url) override {
-        connect_signaling(signaling_url, /*is_host=*/true, "");
+        connect_signaling(signaling_url, true, "");
     }
 
-    // ── Guest ────────────────────────────────────────────────
+    // Guest
     void join(const std::string& signaling_url,
               const std::string& code) override {
-        connect_signaling(signaling_url, /*is_host=*/false, code);
+        connect_signaling(signaling_url, false, code);
     }
 
-    // ── Send ─────────────────────────────────────────────────
+    // Send
     void send(std::span<const uint8_t> data) override {
-        if (!dc_ || !dc_->isOpen()) return;
+        if (!dc_ || !dc_->isOpen())
+            return;
         dc_->send(reinterpret_cast<const std::byte*>(data.data()), data.size());
     }
 
     void close() override {
-        if (dc_) dc_->close();
-        if (pc_) pc_->close();
-        if (ws_) ws_->close();
+        if (dc_)
+            dc_->close();
+        if (pc_)
+            pc_->close();
+        if (ws_)
+            ws_->close();
     }
 
 private:
-    std::shared_ptr<rtc::WebSocket>     ws_;
+    std::shared_ptr<rtc::WebSocket> ws_;
     std::shared_ptr<rtc::PeerConnection> pc_;
-    std::shared_ptr<rtc::DataChannel>   dc_;
-    std::string                         lobby_code_;
+    std::shared_ptr<rtc::DataChannel> dc_;
+    std::string lobby_code_;
 
-    void connect_signaling(const std::string& url,
-                           bool is_host,
-                           const std::string& code)
+    void connect_signaling(const std::string& url, bool is_host, const std::string& code)
     {
         ws_ = std::make_shared<rtc::WebSocket>();
 
@@ -61,7 +63,8 @@ private:
         });
 
         ws_->onMessage([this, is_host](rtc::message_variant data) {
-            if (!std::holds_alternative<std::string>(data)) return;
+            if (!std::holds_alternative<std::string>(data))
+                return;
             auto j = nlohmann::json::parse(std::get<std::string>(data));
             handle_signaling(j, is_host);
         });
@@ -80,7 +83,7 @@ private:
             // Host receives lobby code from signaling server
             lobby_code_ = j["code"].get<std::string>();
             if (on_lobby_code) on_lobby_code(lobby_code_);
-            setup_peer(/*initiator=*/true);
+            setup_peer(true);
 
         } else if (type == "guest_ready") {
             // Signaling server tells host a guest has arrived; create offer
@@ -88,7 +91,7 @@ private:
 
         } else if (type == "offer") {
             // Guest receives host's SDP offer
-            setup_peer(/*initiator=*/false);
+            setup_peer(false);
             pc_->setRemoteDescription({ j["sdp"].get<std::string>(), "offer" });
 
         } else if (type == "answer") {
@@ -97,8 +100,10 @@ private:
 
         } else if (type == "ice") {
             // ICE candidate from peer
-            rtc::Candidate c{ j["candidate"].get<std::string>(),
-                              j["mid"].get<std::string>() };
+            rtc::Candidate c {
+                j["candidate"].get<std::string>(),
+                j["mid"].get<std::string>()
+            };
             pc_->addRemoteCandidate(c);
         }
     }
@@ -119,9 +124,9 @@ private:
 
         pc_->onLocalCandidate([this](rtc::Candidate c) {
             nlohmann::json msg = {
-                {"type",      "ice"},
+                {"type", "ice"},
                 {"candidate", std::string(c)},
-                {"mid",       c.mid()}
+                {"mid", c.mid()}
             };
             ws_->send(msg.dump());
         });
@@ -139,16 +144,19 @@ private:
     }
 
     void create_offer() {
-        if (pc_) pc_->setLocalDescription();
+        if (pc_)
+            pc_->setLocalDescription();
     }
 
     void setup_dc() {
         dc_->onOpen([this]() {
             std::cout << "[transport] DataChannel open\n";
-            if (on_open) on_open();
+            if (on_open)
+                on_open();
         });
         dc_->onMessage([this](rtc::message_variant data) {
-            if (!std::holds_alternative<rtc::binary>(data)) return;
+            if (!std::holds_alternative<rtc::binary>(data))
+                return;
             auto& bin = std::get<rtc::binary>(data);
             if (on_message) {
                 on_message({ reinterpret_cast<const uint8_t*>(bin.data()), bin.size() });
@@ -156,7 +164,8 @@ private:
         });
         dc_->onClosed([this]() {
             std::cout << "[transport] DataChannel closed\n";
-            if (on_close) on_close();
+            if (on_close)
+                on_close();
         });
     }
 };
@@ -167,4 +176,4 @@ std::unique_ptr<Transport> make_transport() {
 
 } // namespace pong
 
-#endif // !PONG_WASM
+#endif
