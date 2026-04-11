@@ -29,6 +29,9 @@ struct App {
     std::string lobby_code;
     std::string join_code_input;
     bool peer_connected = false;
+    bool connecting = false;
+    bool game_over = false;
+    int winner = 0; // 1 = host (A), 2 = guest (B)
 
     // Per-tick input ring. Host stores last 64 guest inputs
     std::array<pong::InputMsg, 64> input_buf{};
@@ -77,21 +80,40 @@ static void start_as_guest(const std::string& code) {
         auto type = pong::peek_type(buf);
         if (type == pong::MsgType::GameState) {
             const auto* msg = pong::msg_cast<pong::GameStateMsg>(buf);
-            if (msg)
+            if (msg) {
                 pong::msg_to_sim(*msg, g_app.sim);
+                if (g_app.sim.score_a >= pong::WIN_SCORE) {
+                    g_app.game_over = true;
+                    g_app.winner = 1;
+                } else if (g_app.sim.score_b >= pong::WIN_SCORE) {
+                    g_app.game_over = true;
+                    g_app.winner = 2;
+                }
+            }
         }
     };
-    g_app.transport->on_close = []() { g_app.peer_connected = false; };
+    g_app.transport->on_close = []() {
+        if (!g_app.peer_connected) {
+            // Failed before connecting (bad code, network error, etc.); let user retry
+            g_app.connecting = false;
+            g_app.join_code_input.clear();
+            g_app.role = pong::Role::Guest; // stay on guest entry screen
+        }
+        g_app.peer_connected = false;
+    };
 
     g_app.transport->join(SIGNALING_URL, code);
 }
 
-// ── Game tick (host only) ─────────────────────────────────────
+// Game tick (host only)
 static void game_tick() {
+    if (g_app.game_over)
+        return;
+
     int8_t dir_a = 0;
-    if (IsKeyDown(KEY_W))
+    if (IsKeyDown(KEY_UP))
         dir_a = -1;
-    if (IsKeyDown(KEY_S))
+    if (IsKeyDown(KEY_DOWN))
         dir_a =  1;
 
     int8_t dir_b = 0;
@@ -100,6 +122,14 @@ static void game_tick() {
         dir_b = gi.dir;
 
     pong::sim_tick(g_app.sim, dir_a, dir_b);
+
+    if (g_app.sim.score_a >= pong::WIN_SCORE) {
+        g_app.game_over = true;
+        g_app.winner = 1;
+    } else if (g_app.sim.score_b >= pong::WIN_SCORE) {
+        g_app.game_over = true;
+        g_app.winner = 2;
+    }
 
     if (g_app.sim.tick % 2 == 0) {
         auto msg = pong::sim_to_msg(g_app.sim);
@@ -112,20 +142,42 @@ static void draw_game() {
     const auto& s = g_app.sim;
     ClearBackground(BLACK);
 
+    // Center dashed line
     for (int y = 0; y < SCREEN_H; y += 30)
         DrawRectangle(SCREEN_W / 2 - 2, y, 4, 18, GRAY);
 
+    // Ball
     DrawRectangle(
         static_cast<int>(s.ball_x / 100), static_cast<int>(s.ball_y / 100),
         10, 10, WHITE);
 
+    // Paddles
     int ph = pong::PADDLE_H / 100;
     int pw = pong::PADDLE_W / 100;
     DrawRectangle(0, static_cast<int>(s.paddle_a_y / 100), pw, ph, WHITE);
     DrawRectangle(SCREEN_W - pw, static_cast<int>(s.paddle_b_y / 100), pw, ph, WHITE);
 
-    DrawText(TextFormat("%d", s.score_a), SCREEN_W / 2 - 60, 20, 40, WHITE);
-    DrawText(TextFormat("%d", s.score_b), SCREEN_W / 2 + 30, 20, 40, WHITE);
+    // Scores centered at top
+    static constexpr int SCORE_FONT = 48;
+    static constexpr int SCORE_GAP = 24; // gap from center line on each side
+    static constexpr int SCORE_Y = 16;
+    const char* score_a_str = TextFormat("%d", s.score_a);
+    const char* score_b_str = TextFormat("%d", s.score_b);
+    int wa = MeasureText(score_a_str, SCORE_FONT);
+    int wb = MeasureText(score_b_str, SCORE_FONT);
+    DrawText(score_a_str, SCREEN_W / 2 - SCORE_GAP - wa, SCORE_Y, SCORE_FONT, WHITE);
+    DrawText(score_b_str, SCREEN_W / 2 + SCORE_GAP,      SCORE_Y, SCORE_FONT, WHITE);
+
+    // Win overlay
+    if (g_app.game_over) {
+        DrawRectangle(0, 0, SCREEN_W, SCREEN_H, Color{0, 0, 0, 160});
+        const char* msg = (g_app.winner == 1) ? "HOST WINS!" : "GUEST WINS!";
+        int mw = MeasureText(msg, 60);
+        DrawText(msg, SCREEN_W / 2 - mw / 2, SCREEN_H / 2 - 50, 60, YELLOW);
+        const char* sub = "Press SPACE to play again";
+        int sw = MeasureText(sub, 24);
+        DrawText(sub, SCREEN_W / 2 - sw / 2, SCREEN_H / 2 + 30, 24, LIGHTGRAY);
+    }
 }
 
 static void draw_lobby() {
@@ -143,9 +195,13 @@ static void draw_lobby() {
         }
 
     } else if (g_app.role == pong::Role::Guest) {
-        DrawText("Enter lobby code:", 220, 200, 28, WHITE);
-        DrawText(g_app.join_code_input.c_str(), 280, 260, 40, GREEN);
-        DrawText("Press ENTER to join", 240, 330, 20, GRAY);
+        if (g_app.connecting) {
+            DrawText("Connecting...", 270, 260, 32, YELLOW);
+        } else {
+            DrawText("Enter lobby code:", 220, 200, 28, WHITE);
+            DrawText(g_app.join_code_input.c_str(), 280, 260, 40, GREEN);
+            DrawText("Press ENTER to join", 240, 330, 20, GRAY);
+        }
     }
 }
 
@@ -157,33 +213,47 @@ static void main_loop() {
         if (IsKeyPressed(KEY_J))
             g_app.role = pong::Role::Guest;
 
-    } else if (g_app.role == pong::Role::Guest && !g_app.peer_connected) {
+    } else if (g_app.role == pong::Role::Guest && !g_app.peer_connected && !g_app.connecting) {
         int key = GetCharPressed();
         while (key > 0) {
-            if (g_app.join_code_input.size() < 6)
+            if (g_app.join_code_input.size() < 6) {
+                // Normalize to uppercase to match server-generated codes
+                if (key >= 'a' && key <= 'z')
+                    key -= 32;
                 g_app.join_code_input += static_cast<char>(key);
+            }
             key = GetCharPressed();
         }
         if (IsKeyPressed(KEY_BACKSPACE) && !g_app.join_code_input.empty())
             g_app.join_code_input.pop_back();
-        if (IsKeyPressed(KEY_ENTER) && g_app.join_code_input.size() == 6)
+        if (IsKeyPressed(KEY_ENTER) && g_app.join_code_input.size() == 6) {
+            g_app.connecting = true;
             start_as_guest(g_app.join_code_input);
+        }
 
     } else if (g_app.peer_connected) {
-        if (g_app.role == pong::Role::Guest) {
-            int8_t dir = 0;
-            if (IsKeyDown(KEY_UP))
-                dir = -1;
-            if (IsKeyDown(KEY_DOWN))
-                dir =  1;
-            pong::InputMsg msg{};
-            msg.tick = g_app.sim.tick;
-            msg.dir = dir;
-            msg.checksum = pong::sim_checksum(g_app.sim);
-            g_app.transport->send_msg(msg);
+        if (g_app.game_over) {
+            if (IsKeyPressed(KEY_SPACE) && g_app.role == pong::Role::Host) {
+                g_app.sim = pong::SimState{};
+                g_app.game_over = false;
+                g_app.winner = 0;
+            }
+        } else {
+            if (g_app.role == pong::Role::Guest) {
+                int8_t dir = 0;
+                if (IsKeyDown(KEY_UP))
+                    dir = -1;
+                if (IsKeyDown(KEY_DOWN))
+                    dir =  1;
+                pong::InputMsg msg{};
+                msg.tick = g_app.sim.tick;
+                msg.dir = dir;
+                msg.checksum = pong::sim_checksum(g_app.sim);
+                g_app.transport->send_msg(msg);
+            }
+            if (g_app.role == pong::Role::Host)
+                game_tick();
         }
-        if (g_app.role == pong::Role::Host)
-            game_tick();
     }
 
     BeginDrawing();
