@@ -33,9 +33,7 @@ EM_JS(void, js_transport_host, (const char* signaling_url), {
         console.log('[pong] host: signaling rx:', e.data);
         const msg = JSON.parse(e.data);
         if (msg.type === 'code') {
-            const ptr = Module.stringToNewUTF8(msg.code);
-            Module.ccall('wasm_on_lobby_code', null, ['number'], [ptr]);
-            Module._free(ptr);
+            Module.ccall('wasm_on_lobby_code', null, ['string'], [msg.code]);
         } else if (msg.type === 'guest_ready' || msg.type === 'ready') {
             console.log('[pong] host: relay established');
             Module.ccall('wasm_on_open', null, [], []);

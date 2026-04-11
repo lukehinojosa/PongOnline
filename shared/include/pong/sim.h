@@ -99,35 +99,6 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
     s.tick++;
 }
 
-// Pack SimState into a GameStateMsg (delta_mask = DELTA_ALL for now)
-inline GameStateMsg sim_to_msg(const SimState& s) {
-    GameStateMsg msg{};
-    msg.tick = s.tick;
-    msg.ball_x = static_cast<int16_t>(s.ball_x / 100);
-    msg.ball_y = static_cast<int16_t>(s.ball_y / 100);
-    msg.ball_vx = static_cast<int16_t>(s.ball_vx / 100);
-    msg.ball_vy = static_cast<int16_t>(s.ball_vy / 100);
-    msg.paddle_a_y = static_cast<int16_t>(s.paddle_a_y / 100);
-    msg.paddle_b_y = static_cast<int16_t>(s.paddle_b_y / 100);
-    msg.score_a = s.score_a;
-    msg.score_b = s.score_b;
-    msg.delta_mask = DELTA_ALL;
-    return msg;
-}
-
-// Unpack a GameStateMsg back into SimState
-inline void msg_to_sim(const GameStateMsg& msg, SimState& s) {
-    s.tick = msg.tick;
-    s.ball_x = msg.ball_x * 100;
-    s.ball_y = msg.ball_y * 100;
-    s.ball_vx = msg.ball_vx * 100;
-    s.ball_vy = msg.ball_vy * 100;
-    s.paddle_a_y = msg.paddle_a_y * 100;
-    s.paddle_b_y = msg.paddle_b_y * 100;
-    s.score_a = msg.score_a;
-    s.score_b = msg.score_b;
-}
-
 // Checksum over the fields that matter for desync detection
 inline uint16_t sim_checksum(const SimState& s) {
     uint32_t h = s.tick;

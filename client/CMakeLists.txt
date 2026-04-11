@@ -17,6 +17,14 @@ if(NOT EMSCRIPTEN)
             asio::asio
     )
     target_compile_definitions(pong_client PRIVATE PONG_NATIVE)
+
+    # Copy the Assets folder next to the native executable after building
+    add_custom_command(TARGET pong_client POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/Assets"
+        "$<TARGET_FILE_DIR:pong_client>/Assets"
+        COMMENT "Copying Assets directory to build output..."
+    )
 endif()
 
 # ── WASM build ───────────────────────────────────────────────
@@ -36,6 +44,9 @@ if(EMSCRIPTEN)
             "SHELL:-s EXPORTED_RUNTIME_METHODS=[\"ccall\",\"cwrap\",\"stringToNewUTF8\"]"
             "SHELL:-s EXPORTED_FUNCTIONS=[\"_main\",\"_wasm_on_open\",\"_wasm_on_close\",\"_wasm_on_message\",\"_wasm_on_lobby_code\"]"
             "SHELL:-s WEBSOCKET_SUBPROTOCOL=\"binary\""
+
+            # Package the Assets folder into the WASM virtual file system
+            "SHELL:--preload-file \"${CMAKE_SOURCE_DIR}/Assets@/Assets\""
     )
 endif()
 

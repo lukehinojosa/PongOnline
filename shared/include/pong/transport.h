@@ -8,12 +8,6 @@
 namespace pong {
 
 // Abstract peer transport
-// Implemented by:
-//   transport_native.cpp  — libdatachannel (native Windows build)
-//   transport_wasm.cpp    — EM_JS WebRTC bridge (WASM build)
-//
-// Both sides (host and guest) use the same interface.
-// The host creates a lobby, the guest joins with a code.
 
 struct Transport {
     // Called when the DataChannel is open and ready to send.

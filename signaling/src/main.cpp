@@ -42,11 +42,11 @@ static void handle_client(std::shared_ptr<rtc::WebSocket> ws) {
             if (it != g_relay.end()) {
                 if (std::holds_alternative<std::string>(data)) {
                     const auto& s = std::get<std::string>(data);
-                    std::cout << "[relay] text " << ws.get() << ": " << s.substr(0, 40) << "\n";
                     it->second->send(s);
                 } else {
                     const auto& b = std::get<rtc::binary>(data);
-                    std::cout << "[relay] binary " << ws.get() << ": " << b.size() << " bytes\n";
+                    // Silently forward binary data.
+                    // At 60Hz per client, logging here would flood the console.
                     it->second->send(b);
                 }
                 return;
