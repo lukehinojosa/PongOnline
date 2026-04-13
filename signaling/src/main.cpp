@@ -58,7 +58,7 @@ static void start_cloudflared_tunnel(int port) {
         return;
     }
 
-    std::string cmd = "\"" + cloudflared_path + "\" tunnel --url ws://localhost:"
+    std::string cmd = "\"" + cloudflared_path + "\" tunnel --url http://localhost:"
                     + std::to_string(port) + " --no-autoupdate 2>&1";
 
     std::cout << "[tunnel] starting cloudflared quick tunnel...\n";
