@@ -3,6 +3,7 @@
 #include "sim.h"
 #include <cstdint>
 #include <span>
+#include <string>
 
 namespace pong {
 
@@ -195,6 +196,70 @@ inline bool decode_input(std::span<const uint8_t> buf, DecodedInput& out) {
     out.dir = static_cast<int8_t>(zz_dec(vlq_read(p, end)));
     if (p + 2 > end) return false;
     out.checksum = static_cast<uint16_t>(p[0] | (static_cast<uint16_t>(p[1]) << 8));
+    return true;
+}
+
+// Ping / Pong codec
+// Wire format: raw packed struct (9 bytes each).
+static constexpr int PING_BYTES = 9;
+static constexpr int PONG_BYTES = 9;
+
+inline int encode_ping(uint8_t* buf, uint32_t seq, uint32_t client_ts) {
+    PingMsg m;
+    m.seq = seq;
+    m.client_ts = client_ts;
+    std::memcpy(buf, &m, sizeof(m));
+    return sizeof(m);
+}
+
+inline bool decode_ping(std::span<const uint8_t> buf, uint32_t& seq, uint32_t& client_ts) {
+    if (buf.size() < sizeof(PingMsg) || buf[0] != static_cast<uint8_t>(MsgType::Ping))
+        return false;
+    PingMsg m;
+    std::memcpy(&m, buf.data(), sizeof(m));
+    seq = m.seq;
+    client_ts = m.client_ts;
+    return true;
+}
+
+inline int encode_pong(uint8_t* buf, uint32_t seq, uint32_t client_ts) {
+    PongMsg m;
+    m.seq = seq;
+    m.client_ts = client_ts;
+    std::memcpy(buf, &m, sizeof(m));
+    return sizeof(m);
+}
+
+inline bool decode_pong(std::span<const uint8_t> buf, uint32_t& seq, uint32_t& client_ts) {
+    if (buf.size() < sizeof(PongMsg) || buf[0] != static_cast<uint8_t>(MsgType::Pong))
+        return false;
+    PongMsg m;
+    std::memcpy(&m, buf.data(), sizeof(m));
+    seq = m.seq;
+    client_ts = m.client_ts;
+    return true;
+}
+
+// Username wire format: 1 type byte + 1 length byte + up to 31 UTF-8 chars.
+static constexpr int USERNAME_MAX_LEN   = 31;
+static constexpr int USERNAME_MAX_BYTES = 2 + USERNAME_MAX_LEN;
+
+inline int encode_username(uint8_t* buf, const std::string& name) {
+    uint8_t* p = buf;
+    *p++ = static_cast<uint8_t>(MsgType::Username);
+    uint8_t len = static_cast<uint8_t>(std::min(name.size(), static_cast<size_t>(USERNAME_MAX_LEN)));
+    *p++ = len;
+    std::memcpy(p, name.data(), len);
+    return 2 + len;
+}
+
+inline bool decode_username(std::span<const uint8_t> buf, std::string& out) {
+    if (buf.size() < 2 || buf[0] != static_cast<uint8_t>(MsgType::Username))
+        return false;
+    uint8_t len = buf[1];
+    if (buf.size() < static_cast<size_t>(2 + len))
+        return false;
+    out.assign(reinterpret_cast<const char*>(buf.data() + 2), len);
     return true;
 }
 

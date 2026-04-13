@@ -14,6 +14,7 @@ enum class MsgType : uint8_t {
     Reconcile = 0x21,
     Ping = 0x30,
     Pong = 0x31,
+    Username = 0x40,
     Disconnect = 0xFF,
 };
 
