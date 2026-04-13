@@ -1,12 +1,101 @@
 #include <nlohmann/json.hpp>
 #include <rtc/rtc.hpp>
 
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <random>
+#include <regex>
 #include <string>
+#include <thread>
 #include <unordered_map>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
+// Cloudflare Quick Tunnel
+// Spawns cloudflared (expected next to this exe) and parses the assigned
+// trycloudflare.com URL so users can copy-paste a ready-made WSS address.
+
+static std::string get_exe_dir() {
+#ifdef _WIN32
+    char buf[MAX_PATH] = {};
+    GetModuleFileNameA(nullptr, buf, MAX_PATH);
+    char* last = strrchr(buf, '\\');
+    if (last) *last = '\0';
+    return buf;
+#elif defined(__linux__)
+    char buf[4096] = {};
+    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (len > 0) {
+        buf[len] = '\0';
+        char* last = strrchr(buf, '/');
+        if (last) *last = '\0';
+        return buf;
+    }
+    return ".";
+#else
+    return ".";
+#endif
+}
+
+static void start_cloudflared_tunnel(int port) {
+    std::string exe_dir = get_exe_dir();
+#ifdef _WIN32
+    std::string cloudflared_path = exe_dir + "\\cloudflared.exe";
+#else
+    std::string cloudflared_path = exe_dir + "/cloudflared";
+#endif
+
+    if (!std::ifstream(cloudflared_path).good()) {
+        std::cout << "[tunnel] cloudflared not found — skipping WSS tunnel\n"
+                  << "[tunnel] clients must use ws://<your-ip>:" << port << " directly\n";
+        return;
+    }
+
+    std::string cmd = "\"" + cloudflared_path + "\" tunnel --url ws://localhost:"
+                    + std::to_string(port) + " --no-autoupdate 2>&1";
+
+    std::cout << "[tunnel] starting cloudflared quick tunnel...\n";
+
+    std::thread([cmd]() {
+#ifdef _WIN32
+        FILE* pipe = _popen(cmd.c_str(), "r");
+#else
+        FILE* pipe = popen(cmd.c_str(), "r");
+#endif
+        if (!pipe) {
+            std::cerr << "[tunnel] failed to spawn cloudflared\n";
+            return;
+        }
+
+        static const std::regex url_re(R"(https://[\w-]+\.trycloudflare\.com)");
+        char line[2048];
+        while (fgets(line, sizeof(line), pipe)) {
+            std::string s(line);
+            std::smatch m;
+            if (std::regex_search(s, m, url_re)) {
+                std::string wss_url = "wss://" + m[0].str().substr(8); // https:// -> wss://
+                std::cout << "\n"
+                          << "[tunnel] ============================================\n"
+                          << "[tunnel]  WSS URL: " << wss_url << "\n"
+                          << "[tunnel]  Enter this in the game's signaling field\n"
+                          << "[tunnel] ============================================\n\n"
+                          << std::flush;
+            }
+        }
+#ifdef _WIN32
+        _pclose(pipe);
+#else
+        pclose(pipe);
+#endif
+    }).detach();
+}
 
 // Shared state
 
@@ -123,6 +212,8 @@ static void handle_client(std::shared_ptr<rtc::WebSocket> ws) {
 
 int main() {
     std::cout << "[signaling] Online Pong signaling server starting on port 9000\n";
+
+    start_cloudflared_tunnel(9000);
 
     rtc::WebSocketServer::Configuration cfg;
     cfg.port = 9000;
