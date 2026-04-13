@@ -1,5 +1,10 @@
 add_executable(pong_client
         src/main.cpp
+        src/storage.cpp
+        src/ui.cpp
+        src/app.cpp
+        src/net.cpp
+        src/render.cpp
         src/webrtc/transport_native.cpp   # compiled on all platforms; #ifdef guards WASM out
         src/webrtc/transport_wasm.cpp     # compiled on all platforms; #ifdef guards native out
 )
