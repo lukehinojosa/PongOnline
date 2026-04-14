@@ -50,6 +50,15 @@ struct QuantState {
     uint8_t score_a = 0;
     uint8_t score_b = 0;
     uint32_t tick = 0;
+
+    // Schrödinger ball (pixel precision, same quantisation as above)
+    bool has_schrodinger = false;
+    int32_t s_ball_x = 0;
+    int32_t s_ball_y = 0;
+    int32_t s_ball_vx = 0;
+    int32_t s_ball_vy = 0;
+    int32_t schro_spawn_y = 0;    // ball_y at spawn for guest hit-detection
+    uint32_t schro_spawn_tick = 0;
 };
 
 inline QuantState sim_quantize(const SimState& s) {
@@ -63,6 +72,13 @@ inline QuantState sim_quantize(const SimState& s) {
     q.score_a = s.score_a;
     q.score_b = s.score_b;
     q.tick = s.tick;
+    q.has_schrodinger = s.has_schrodinger;
+    q.s_ball_x = s.s_ball_x / 100;
+    q.s_ball_y = s.s_ball_y / 100;
+    q.s_ball_vx = s.s_ball_vx / 100;
+    q.s_ball_vy = s.s_ball_vy / 100;
+    q.schro_spawn_y = s.schro_spawn_y / 100;
+    q.schro_spawn_tick = s.schro_spawn_tick;
     return q;
 }
 
@@ -76,6 +92,12 @@ inline uint8_t compute_delta_mask(const QuantState& prev, const QuantState& cur)
     if (cur.paddle_a_y != prev.paddle_a_y) m |= DELTA_PADDLE_A;
     if (cur.paddle_b_y != prev.paddle_b_y) m |= DELTA_PADDLE_B;
     if (cur.score_a != prev.score_a || cur.score_b != prev.score_b) m |= DELTA_SCORE;
+    // Schrödinger ball: set whenever its active state differs or any field moved
+    if (cur.has_schrodinger != prev.has_schrodinger ||
+        (cur.has_schrodinger && (
+            cur.s_ball_x != prev.s_ball_x || cur.s_ball_y != prev.s_ball_y ||
+            cur.s_ball_vx != prev.s_ball_vx || cur.s_ball_vy != prev.s_ball_vy)))
+        m |= DELTA_SCHRO;
     return m;
 }
 
@@ -91,7 +113,8 @@ inline uint8_t compute_delta_mask(const QuantState& prev, const QuantState& cur)
 //     PADDLE_A  — zz-VLQ delta from prev.paddle_a_y
 //     PADDLE_B  — zz-VLQ delta from prev.paddle_b_y
 //     SCORE     — 1 byte packed: (score_a << 4) | score_b  (max 7 each → fits 4 bits)
-static constexpr int GAMESTATE_MAX_BYTES = 24;
+// Extra schro fields add at most ~24 bytes (1 flag + 6 VLQ fields up to 5b each)
+static constexpr int GAMESTATE_MAX_BYTES = 48;
 
 inline int encode_game_state(uint8_t* buf, const SimState& cur,
                               const QuantState& prev, uint8_t dmask) {
@@ -114,6 +137,17 @@ inline int encode_game_state(uint8_t* buf, const SimState& cur,
         p += vlq_write(p, zz_enc(q.paddle_b_y - prev.paddle_b_y));
     if (dmask & DELTA_SCORE)
         *p++ = static_cast<uint8_t>((q.score_a << 4) | (q.score_b & 0x0F));
+    if (dmask & DELTA_SCHRO) {
+        *p++ = q.has_schrodinger ? 1u : 0u;
+        if (q.has_schrodinger) {
+            p += vlq_write(p, zz_enc(q.s_ball_x - prev.s_ball_x));
+            p += vlq_write(p, zz_enc(q.s_ball_y - prev.s_ball_y));
+            p += vlq_write(p, zz_enc(q.s_ball_vx));
+            p += vlq_write(p, zz_enc(q.s_ball_vy));
+            p += vlq_write(p, zz_enc(q.schro_spawn_y));
+            p += vlq_write(p, q.schro_spawn_tick);
+        }
+    }
     return static_cast<int>(p - buf);
 }
 
@@ -149,6 +183,22 @@ inline bool decode_game_state(std::span<const uint8_t> buf, SimState& sim, Quant
         q.score_a = sc >> 4;
         q.score_b = sc & 0x0F;
     }
+    if (dmask & DELTA_SCHRO) {
+        if (p >= end) return false;
+        q.has_schrodinger = (*p++ != 0);
+        if (q.has_schrodinger) {
+            q.s_ball_x = prev.s_ball_x + zz_dec(vlq_read(p, end));
+            q.s_ball_y = prev.s_ball_y + zz_dec(vlq_read(p, end));
+            q.s_ball_vx = zz_dec(vlq_read(p, end));
+            q.s_ball_vy = zz_dec(vlq_read(p, end));
+            q.schro_spawn_y = zz_dec(vlq_read(p, end));
+            q.schro_spawn_tick = vlq_read(p, end);
+        } else {
+            q.s_ball_x = 0; q.s_ball_y = 0;
+            q.s_ball_vx = 0; q.s_ball_vy = 0;
+            q.schro_spawn_y = 0; q.schro_spawn_tick = 0;
+        }
+    }
 
     prev = q;
     sim.tick = q.tick;
@@ -160,6 +210,13 @@ inline bool decode_game_state(std::span<const uint8_t> buf, SimState& sim, Quant
     sim.paddle_b_y = q.paddle_b_y * 100;
     sim.score_a = q.score_a;
     sim.score_b = q.score_b;
+    sim.has_schrodinger  = q.has_schrodinger;
+    sim.s_ball_x         = q.s_ball_x * 100;
+    sim.s_ball_y         = q.s_ball_y * 100;
+    sim.s_ball_vx        = q.s_ball_vx * 100;
+    sim.s_ball_vy        = q.s_ball_vy * 100;
+    sim.schro_spawn_y    = q.schro_spawn_y * 100;
+    sim.schro_spawn_tick = q.schro_spawn_tick;
     return true;
 }
 
@@ -262,6 +319,28 @@ inline bool decode_username(std::span<const uint8_t> buf, std::string& out) {
     if (buf.size() < static_cast<size_t>(2 + len))
         return false;
     out.assign(reinterpret_cast<const char*>(buf.data() + 2), len);
+    return true;
+}
+
+// AuthCollision wire format: raw packed struct (6 bytes, host ↔ guest)
+static constexpr int AUTH_COLLISION_BYTES = 6; // == sizeof(AuthCollisionMsg)
+
+inline int encode_auth_collision(uint8_t* buf, uint32_t tick, uint8_t did_hit) {
+    AuthCollisionMsg m;
+    m.tick = tick;
+    m.did_hit = did_hit;
+    std::memcpy(buf, &m, sizeof(m));
+    return sizeof(m);
+}
+
+inline bool decode_auth_collision(std::span<const uint8_t> buf, uint32_t& tick, uint8_t& did_hit) {
+    if (buf.size() < sizeof(AuthCollisionMsg) ||
+        buf[0] != static_cast<uint8_t>(MsgType::AuthCollision))
+        return false;
+    AuthCollisionMsg m;
+    std::memcpy(&m, buf.data(), sizeof(m));
+    tick    = m.tick;
+    did_hit = m.did_hit;
     return true;
 }
 

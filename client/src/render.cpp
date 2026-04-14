@@ -25,9 +25,15 @@ RenderState compute_render_state() {
         rs.paddle_b_y = g_app.render_paddle_b_y;
 
         if (snaps.size() == 1 || render_tick <= snaps.front().state.tick) {
-            rs.ball_x = (float)snaps.front().state.ball_x;
-            rs.ball_y = (float)snaps.front().state.ball_y;
-            rs.paddle_a_y = (float)snaps.front().state.paddle_a_y;
+            const auto& s = snaps.front().state;
+            rs.ball_x = (float)s.ball_x;
+            rs.ball_y = (float)s.ball_y;
+            rs.paddle_a_y = (float)s.paddle_a_y;
+            if (s.has_schrodinger) {
+                rs.is_split = true;
+                rs.ghost_ball_x = (float)s.s_ball_x;
+                rs.ghost_ball_y = (float)s.s_ball_y;
+            }
             return rs;
         }
 
@@ -43,6 +49,16 @@ RenderState compute_render_state() {
             rs.ball_x = lerpf((float)prev->state.ball_x, (float)next->state.ball_x, t);
             rs.ball_y = lerpf((float)prev->state.ball_y, (float)next->state.ball_y, t);
             rs.paddle_a_y = lerpf((float)prev->state.paddle_a_y, (float)next->state.paddle_a_y, t);
+            if (next->state.has_schrodinger) {
+                rs.is_split = true;
+                // If prev also has schro (same event), interpolate; otherwise snap.
+                float sx0 = prev->state.has_schrodinger
+                    ? (float)prev->state.s_ball_x : (float)next->state.s_ball_x;
+                float sy0 = prev->state.has_schrodinger
+                    ? (float)prev->state.s_ball_y : (float)next->state.s_ball_y;
+                rs.ghost_ball_x = lerpf(sx0, (float)next->state.s_ball_x, t);
+                rs.ghost_ball_y = lerpf(sy0, (float)next->state.s_ball_y, t);
+            }
         } else {
             const Snapshot& lat = snaps.back();
             uint32_t dt = render_tick - lat.state.tick;
@@ -59,6 +75,20 @@ RenderState compute_render_state() {
             }
             rs.ball_x = bx; rs.ball_y = by;
             rs.paddle_a_y = (float)lat.state.paddle_a_y;
+            if (lat.state.has_schrodinger) {
+                rs.is_split = true;
+                float sbx = (float)lat.state.s_ball_x, sby = (float)lat.state.s_ball_y;
+                float svx = (float)lat.state.s_ball_vx, svy = (float)lat.state.s_ball_vy;
+                for (uint32_t i = 0; i < dt; ++i) {
+                    sbx += svx; sby += svy;
+                    if (sby <= 0.f) { sby = 0.f; svy = -svy; }
+                    if (sby >= MY) { sby = MY; svy = -svy; }
+                    if (sbx < 0.f) sbx = 0.f;
+                    if (sbx > MX) sbx = MX;
+                }
+                rs.ghost_ball_x = sbx;
+                rs.ghost_ball_y = sby;
+            }
         }
         return rs;
     }
@@ -66,11 +96,11 @@ RenderState compute_render_state() {
     rs.ball_y = (float)g_app.sim.ball_y / 100.f;
     rs.paddle_a_y = (float)g_app.sim.paddle_a_y / 100.f;
     rs.paddle_b_y = (float)g_app.sim.paddle_b_y / 100.f;
-
-    // Copy speculative state
-    rs.is_split = g_app.sim.ball_x < 0 || g_app.sim.ball_x > pong::FIELD_W; // Basic approximation for now
-    // In a fully developed version, `is_split`, `ghost_ball_x`, `ghost_ball_y` would be populated from the simulation/app logic.
-
+    rs.is_split = g_app.sim.has_schrodinger;
+    if (rs.is_split) {
+        rs.ghost_ball_x = (float)g_app.sim.s_ball_x / 100.f;
+        rs.ghost_ball_y = (float)g_app.sim.s_ball_y / 100.f;
+    }
     return rs;
 }
 
@@ -105,12 +135,13 @@ void draw_game(const RenderState& rs) {
     for (int y = HUD_H; y < SCREEN_H - BT; y += 30)
         DrawRectangle(mid - 2, y, 4, 18, GRAY);
 
-    // Draw regular ball (local prediction)
-    DrawRectangle((int)rs.ball_x, (int)rs.ball_y + HUD_H, 10, 10, WHITE);
-
-    // Draw ghost ball (the alternate reality)
+    // While a Schrödinger ball is active the real ball is frozen off-screen;
+    // only draw the schro ball (yellow = consensus pending).
+    // Once it resolves the normal white ball takes over again.
     if (rs.is_split) {
-        DrawRectangleLines((int)rs.ghost_ball_x, (int)rs.ghost_ball_y + HUD_H, 10, 10, WHITE);
+        DrawRectangle((int)rs.ghost_ball_x, (int)rs.ghost_ball_y + HUD_H, 10, 10, YELLOW);
+    } else {
+        DrawRectangle((int)rs.ball_x, (int)rs.ball_y + HUD_H, 10, 10, WHITE);
     }
 
     int ph = pong::PADDLE_H / 100, pw = pong::PADDLE_W / 100;

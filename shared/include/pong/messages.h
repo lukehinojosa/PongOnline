@@ -34,7 +34,8 @@ enum DeltaBit : uint8_t {
     DELTA_PADDLE_A = 1 << 4,
     DELTA_PADDLE_B = 1 << 5,
     DELTA_SCORE = 1 << 6,
-    DELTA_ALL = 0x7F,
+    DELTA_SCHRO = 1 << 7,  // Schrödinger ball state changed
+    DELTA_ALL = 0xFF,
 };
 
 // All structs are 1-byte packed little-endian

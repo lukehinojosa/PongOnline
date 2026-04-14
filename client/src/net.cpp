@@ -49,6 +49,13 @@ void start_as_host() {
                 int len = pong::encode_pong(pbuf, seq, client_ts, server_ts);
                 g_app.transport->send({ pbuf, static_cast<size_t>(len) });
             }
+        } else if (type == pong::MsgType::AuthCollision) {
+            // Guest reports whether they hit the ball that just crossed b_face.
+            uint32_t tick; uint8_t did_hit;
+            if (pong::decode_auth_collision(buf, tick, did_hit) &&
+                g_app.sim.has_schrodinger && tick == g_app.sim.schro_spawn_tick) {
+                pong::resolve_schrodinger(g_app.sim, did_hit != 0);
+            }
         } else if (type == pong::MsgType::Username) {
             std::string name;
             if (pong::decode_username(buf, name))
@@ -116,6 +123,37 @@ void start_as_guest(const std::string& code) {
                 }
                 if (g_app.sim.score_a >= pong::WIN_SCORE) { g_app.game_over = true; g_app.winner = 1; }
                 else if (g_app.sim.score_b >= pong::WIN_SCORE) { g_app.game_over = true; g_app.winner = 2; }
+
+                // Detect a new Schrödinger ball event and respond with our verdict.
+                // We use the paddle position at schro_spawn_tick by replaying input
+                // history forward from the host's last known paddle_b_y.
+                if (tmp.has_schrodinger && tmp.schro_spawn_tick != g_app.last_schro_spawn_tick) {
+                    g_app.last_schro_spawn_tick = tmp.schro_spawn_tick;
+
+                    int32_t paddle = tmp.paddle_b_y; // base: host's latest known position
+                    const uint32_t schro_tick = tmp.schro_spawn_tick;
+                    const uint32_t from = tmp.tick + 1;
+                    if (schro_tick >= from) {
+                        const uint32_t replay_to = schro_tick < g_app.local_tick
+                            ? schro_tick : g_app.local_tick;
+                        for (uint32_t t = from; t <= replay_to; ++t) {
+                            paddle += static_cast<int32_t>(g_app.input_history[t % 64]) * pong::PADDLE_SPD;
+                            if (paddle < 0) paddle = 0;
+                            if (paddle > pong::FIELD_H - pong::PADDLE_H)
+                                paddle = pong::FIELD_H - pong::PADDLE_H;
+                        }
+                    }
+
+                    const int32_t spawn_y = tmp.schro_spawn_y; // 1/100-px units
+                    const bool did_hit =
+                        (spawn_y + pong::BALL_SIZE >= paddle) &&
+                        (spawn_y <= paddle + pong::PADDLE_H);
+
+                    uint8_t auth_buf[pong::AUTH_COLLISION_BYTES];
+                    const int alen = pong::encode_auth_collision(
+                        auth_buf, schro_tick, did_hit ? 1u : 0u);
+                    g_app.transport->send({ auth_buf, static_cast<size_t>(alen) });
+                }
             }
         } else if (type == pong::MsgType::Pong) {
             // NTP-style clock offset + RTT measurement.

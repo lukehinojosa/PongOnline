@@ -65,6 +65,7 @@ struct App {
 
     uint32_t local_tick = 0;
     int8_t input_history[64] = {};
+    uint32_t last_schro_spawn_tick = 0; // guest: schro_spawn_tick of last AuthCollision sent
 
     double accumulator_ms = 0.0;
     double last_frame_ms = 0.0;
