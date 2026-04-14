@@ -220,7 +220,36 @@ inline bool decode_game_state(std::span<const uint8_t> buf, SimState& sim, Quant
     return true;
 }
 
-// Input wire format (variable length, max 9 bytes):
+// PaddleState wire format (variable length, max 10 bytes):
+//   msg_id    (1)   — MsgType::PaddleState = 0x11
+//   tick      (VLQ) — absolute tick
+//   paddle_y  (VLQ) — zz-encoded absolute int32 position in 1/100-pixel units
+static constexpr int PADDLE_STATE_MAX_BYTES = 11;
+
+inline int encode_paddle_state(uint8_t* buf, uint32_t tick, int32_t paddle_y) {
+    uint8_t* p = buf;
+    *p++ = static_cast<uint8_t>(MsgType::PaddleState);
+    p += vlq_write(p, tick);
+    p += vlq_write(p, zz_enc(paddle_y));
+    return static_cast<int>(p - buf);
+}
+
+struct DecodedPaddleState {
+    uint32_t tick = 0;
+    int32_t paddle_y = 0;
+};
+
+inline bool decode_paddle_state(std::span<const uint8_t> buf, DecodedPaddleState& out) {
+    if (buf.empty() || buf[0] != static_cast<uint8_t>(MsgType::PaddleState))
+        return false;
+    const uint8_t* p = buf.data() + 1;
+    const uint8_t* end = buf.data() + buf.size();
+    out.tick = vlq_read(p, end);
+    out.paddle_y = zz_dec(vlq_read(p, end));
+    return true;
+}
+
+// Input wire format (deprecated — kept for reference):
 //   msg_id     (1)    — MsgType::Input = 0x10
 //   tick       (VLQ)  — absolute tick
 //   dir        (VLQ)  — zz-encoded int8: -1/0/+1 → 1/0/2
@@ -322,18 +351,21 @@ inline bool decode_username(std::span<const uint8_t> buf, std::string& out) {
     return true;
 }
 
-// AuthCollision wire format: raw packed struct (6 bytes, host ↔ guest)
-static constexpr int AUTH_COLLISION_BYTES = 6; // == sizeof(AuthCollisionMsg)
+// AuthCollision wire format: raw packed struct (7 bytes, host ↔ guest)
+//   side: 0 = Host paddle resolved, 1 = Guest paddle resolved
+static constexpr int AUTH_COLLISION_BYTES = 7; // == sizeof(AuthCollisionMsg)
 
-inline int encode_auth_collision(uint8_t* buf, uint32_t tick, uint8_t did_hit) {
+inline int encode_auth_collision(uint8_t* buf, uint32_t tick, uint8_t did_hit, uint8_t side) {
     AuthCollisionMsg m;
-    m.tick = tick;
+    m.tick    = tick;
     m.did_hit = did_hit;
+    m.side    = side;
     std::memcpy(buf, &m, sizeof(m));
     return sizeof(m);
 }
 
-inline bool decode_auth_collision(std::span<const uint8_t> buf, uint32_t& tick, uint8_t& did_hit) {
+inline bool decode_auth_collision(std::span<const uint8_t> buf,
+                                  uint32_t& tick, uint8_t& did_hit, uint8_t& side) {
     if (buf.size() < sizeof(AuthCollisionMsg) ||
         buf[0] != static_cast<uint8_t>(MsgType::AuthCollision))
         return false;
@@ -341,6 +373,7 @@ inline bool decode_auth_collision(std::span<const uint8_t> buf, uint32_t& tick, 
     std::memcpy(&m, buf.data(), sizeof(m));
     tick    = m.tick;
     did_hit = m.did_hit;
+    side    = m.side;
     return true;
 }
 

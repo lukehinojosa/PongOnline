@@ -93,20 +93,15 @@ static void main_loop() {
             g_app.accumulator_ms = 0.0;
             if (IsKeyPressed(KEY_SPACE) && g_app.role == pong::Role::Host) {
                 g_app.sim = pong::SimState{};
-                g_app.last_tx_state = pong::QuantState{};
-                g_app.last_guest_dir = 0;
-                g_app.input_buf = {};
                 g_app.game_over = false;
                 g_app.winner = 0;
-                // Reset the disconnect-timer so the new game gets a fresh 3-second window.
-                g_app.last_guest_input_ms = now_ms();
-                g_app.guest_ever_sent_input = false;
+                g_app.last_remote_paddle_ms = now_ms();
+                g_app.remote_ever_sent_paddle = false;
             }
         } else {
-            if (g_app.role == pong::Role::Host &&
-                g_app.guest_ever_sent_input &&
-                (now - g_app.last_guest_input_ms) > 3000.0) {
-                TraceLog(LOG_INFO, "[host] guest timed out");
+            // Symmetrical Timeout Logic
+            if (g_app.remote_ever_sent_paddle && (now - g_app.last_remote_paddle_ms) > 3000.0) {
+                TraceLog(LOG_INFO, "[net] peer timed out");
                 reset_app(); return;
             }
             if (IsKeyPressed(KEY_ESCAPE))
@@ -114,29 +109,19 @@ static void main_loop() {
 
             int8_t guest_dir = 0;
             if (g_app.role == pong::Role::Guest && !g_app.show_menu) {
-                if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W))
-                    guest_dir = -1;
-                if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S))
-                    guest_dir = 1;
+                if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W)) guest_dir = -1;
+                if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S)) guest_dir = 1;
             }
 
-            // PLL tick-pacing (guest only): keep local_tick running at ~RTT/TICK_MS ticks
-            // ahead of the last known host tick so inputs arrive on time.
-            // The host always uses multiplier 1.0 (set to default in App).
+            // PLL tick-pacing (guest only)
             if (g_app.role == pong::Role::Guest) {
                 uint32_t rtt_ticks = static_cast<uint32_t>(g_app.rtt_ms / TICK_MS);
                 uint32_t target_tick = g_app.sim.tick + rtt_ticks + 1;
                 int tick_diff = static_cast<int>(target_tick) - static_cast<int>(g_app.local_tick);
+                if (tick_diff > 1) g_app.clock_drift_multiplier = 1.1f;
+                else if (tick_diff < -1) g_app.clock_drift_multiplier = 0.9f;
+                else g_app.clock_drift_multiplier = 1.0f;
 
-                if (tick_diff > 1) {
-                    g_app.clock_drift_multiplier = 1.1f;  // behind target — speed up 10 %
-                } else if (tick_diff < -1) {
-                    g_app.clock_drift_multiplier = 0.9f;  // ahead of target — slow down 10 %
-                } else {
-                    g_app.clock_drift_multiplier = 1.0f;  // within ±1 tick deadband — coast
-                }
-
-                // Guest is the heartbeat source; send a ping on the configured interval.
                 if (now - g_app.last_ping_sent_ms >= PING_INTERVAL_MS) {
                     g_app.last_ping_sent_ms = now;
                     uint32_t ts32 = static_cast<uint32_t>(static_cast<uint64_t>(now) & 0xFFFFFFFF);
@@ -146,24 +131,36 @@ static void main_loop() {
             }
 
             g_app.accumulator_ms += delta * g_app.clock_drift_multiplier;
-
             int ticks_run = 0;
+
             while (g_app.accumulator_ms >= TICK_MS && ticks_run < MAX_TICKS_FRAME) {
                 if (g_app.role == pong::Role::Host) {
                     game_tick();
                 } else {
-                    g_app.input_history[g_app.local_tick % 64] = guest_dir;
-                    g_app.sim.paddle_b_y = std::clamp(
-                        g_app.sim.paddle_b_y + guest_dir * pong::PADDLE_SPD,
-                        0, pong::FIELD_H - pong::PADDLE_H);
+                    bool had_schro = g_app.sim.has_schrodinger;
+                    pong::sim_tick(g_app.sim, 0, guest_dir); // host paddle managed by PaddleState
 
-                    uint8_t ibuf[pong::INPUT_MAX_BYTES];
-                    int ilen = pong::encode_input(ibuf, g_app.local_tick, guest_dir, 0);
-                    g_app.transport->send({ ibuf, static_cast<size_t>(ilen) });
+                    // Guest hit detection trigger
+                    if (!had_schro && g_app.sim.has_schrodinger && g_app.sim.schro_side == 1) {
+                        const int32_t spawn_y = g_app.sim.schro_spawn_y;
+                        const int32_t paddle = g_app.sim.paddle_b_y;
+                        const bool did_hit = (spawn_y + pong::BALL_SIZE >= paddle - pong::BALL_SIZE) &&
+                                             (spawn_y <= paddle + pong::PADDLE_H + pong::BALL_SIZE);
+
+                        uint8_t auth_buf[pong::AUTH_COLLISION_BYTES];
+                        int alen = pong::encode_auth_collision(auth_buf, g_app.sim.schro_spawn_tick, did_hit ? 1u : 0u, 1);
+                        g_app.transport->send({ auth_buf, static_cast<size_t>(alen) });
+
+                        pong::resolve_schrodinger(g_app.sim, did_hit, 1);
+                    }
+
+                    if (g_app.sim.score_a >= pong::WIN_SCORE) { g_app.game_over = true; g_app.winner = 1; }
+                    else if (g_app.sim.score_b >= pong::WIN_SCORE) { g_app.game_over = true; g_app.winner = 2; }
+
+                    uint8_t pbuf[pong::PADDLE_STATE_MAX_BYTES];
+                    int plen = pong::encode_paddle_state(pbuf, g_app.sim.tick, g_app.sim.paddle_b_y);
+                    g_app.transport->send({ pbuf, static_cast<size_t>(plen) });
                     ++g_app.local_tick;
-
-                    float target = (float)g_app.sim.paddle_b_y / 100.f;
-                    g_app.render_paddle_b_y += (target - g_app.render_paddle_b_y) * 0.8f;
                 }
                 g_app.accumulator_ms -= TICK_MS;
                 ++ticks_run;

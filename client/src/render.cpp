@@ -12,90 +12,20 @@ RenderState compute_render_state() {
     RenderState rs;
     rs.score_a = g_app.sim.score_a;
     rs.score_b = g_app.sim.score_b;
-
-    if (g_app.role == pong::Role::Guest) {
-        const uint32_t latest_tick = g_app.sim.tick;
-        const uint32_t render_tick = (latest_tick >= INTERP_DELAY_TICKS)
-            ? latest_tick - INTERP_DELAY_TICKS : 0;
-        std::lock_guard<std::mutex> lk(g_app.snap_mutex);
-        const auto& snaps = g_app.snap_buf;
-        if (snaps.empty())
-            return rs;
-
-        rs.paddle_b_y = g_app.render_paddle_b_y;
-
-        if (snaps.size() == 1 || render_tick <= snaps.front().state.tick) {
-            const auto& s = snaps.front().state;
-            rs.ball_x = (float)s.ball_x;
-            rs.ball_y = (float)s.ball_y;
-            rs.paddle_a_y = (float)s.paddle_a_y;
-            if (s.has_schrodinger) {
-                rs.is_split = true;
-                rs.ghost_ball_x = (float)s.s_ball_x;
-                rs.ghost_ball_y = (float)s.s_ball_y;
-            }
-            return rs;
-        }
-
-        const Snapshot *prev = nullptr, *next = nullptr;
-        for (int i = (int)snaps.size() - 2; i >= 0; --i) {
-            if (snaps[i].state.tick <= render_tick) { prev = &snaps[i]; next = &snaps[i+1]; break; }
-        }
-        auto lerpf = [](float a, float b, float t){ return a + (b - a) * t; };
-        if (prev && next && next->state.tick >= render_tick) {
-            uint32_t span = next->state.tick - prev->state.tick;
-            float t = span > 0 ? std::clamp(
-                (float)(render_tick - prev->state.tick) / (float)span, 0.f, 1.f) : 0.f;
-            rs.ball_x = lerpf((float)prev->state.ball_x, (float)next->state.ball_x, t);
-            rs.ball_y = lerpf((float)prev->state.ball_y, (float)next->state.ball_y, t);
-            rs.paddle_a_y = lerpf((float)prev->state.paddle_a_y, (float)next->state.paddle_a_y, t);
-            if (next->state.has_schrodinger) {
-                rs.is_split = true;
-                // If prev also has schro (same event), interpolate; otherwise snap.
-                float sx0 = prev->state.has_schrodinger
-                    ? (float)prev->state.s_ball_x : (float)next->state.s_ball_x;
-                float sy0 = prev->state.has_schrodinger
-                    ? (float)prev->state.s_ball_y : (float)next->state.s_ball_y;
-                rs.ghost_ball_x = lerpf(sx0, (float)next->state.s_ball_x, t);
-                rs.ghost_ball_y = lerpf(sy0, (float)next->state.s_ball_y, t);
-            }
-        } else {
-            const Snapshot& lat = snaps.back();
-            uint32_t dt = render_tick - lat.state.tick;
-            static constexpr float MY = (float)((pong::FIELD_H - pong::BALL_SIZE) / 100);
-            static constexpr float MX = (float)((pong::FIELD_W - pong::BALL_SIZE) / 100);
-            float bx = (float)lat.state.ball_x, by = (float)lat.state.ball_y;
-            float vx = (float)lat.state.ball_vx, vy = (float)lat.state.ball_vy;
-            for (uint32_t i = 0; i < dt; ++i) {
-                bx += vx; by += vy;
-                if (by <= 0.f) { by = 0.f; vy = -vy; }
-                if (by >= MY) { by = MY; vy = -vy; }
-                if (bx < 0.f) bx = 0.f;
-                if (bx > MX) bx = MX;
-            }
-            rs.ball_x = bx; rs.ball_y = by;
-            rs.paddle_a_y = (float)lat.state.paddle_a_y;
-            if (lat.state.has_schrodinger) {
-                rs.is_split = true;
-                float sbx = (float)lat.state.s_ball_x, sby = (float)lat.state.s_ball_y;
-                float svx = (float)lat.state.s_ball_vx, svy = (float)lat.state.s_ball_vy;
-                for (uint32_t i = 0; i < dt; ++i) {
-                    sbx += svx; sby += svy;
-                    if (sby <= 0.f) { sby = 0.f; svy = -svy; }
-                    if (sby >= MY) { sby = MY; svy = -svy; }
-                    if (sbx < 0.f) sbx = 0.f;
-                    if (sbx > MX) sbx = MX;
-                }
-                rs.ghost_ball_x = sbx;
-                rs.ghost_ball_y = sby;
-            }
-        }
-        return rs;
-    }
     rs.ball_x = (float)g_app.sim.ball_x / 100.f;
     rs.ball_y = (float)g_app.sim.ball_y / 100.f;
-    rs.paddle_a_y = (float)g_app.sim.paddle_a_y / 100.f;
-    rs.paddle_b_y = (float)g_app.sim.paddle_b_y / 100.f;
+
+    // Lerp the remote paddle towards the latest absolute target
+    g_app.render_remote_paddle_y += (g_app.target_remote_paddle_y - g_app.render_remote_paddle_y) * 0.4f;
+
+    if (g_app.role == pong::Role::Host) {
+        rs.paddle_a_y = (float)g_app.sim.paddle_a_y / 100.f;
+        rs.paddle_b_y = g_app.render_remote_paddle_y;
+    } else {
+        rs.paddle_b_y = (float)g_app.sim.paddle_b_y / 100.f;
+        rs.paddle_a_y = g_app.render_remote_paddle_y;
+    }
+
     rs.is_split = g_app.sim.has_schrodinger;
     if (rs.is_split) {
         rs.ghost_ball_x = (float)g_app.sim.s_ball_x / 100.f;
@@ -135,14 +65,12 @@ void draw_game(const RenderState& rs) {
     for (int y = HUD_H; y < SCREEN_H - BT; y += 30)
         DrawRectangle(mid - 2, y, 4, 18, GRAY);
 
-    // While a Schrödinger ball is active the real ball is frozen off-screen;
-    // only draw the schro ball (yellow = consensus pending).
-    // Once it resolves the normal white ball takes over again.
+    // Yellow ghost = Schrödinger ball (the disputed "scored" timeline).
+    // Always draw the real ball; it bounces optimistically regardless.
     if (rs.is_split) {
         DrawRectangle((int)rs.ghost_ball_x, (int)rs.ghost_ball_y + HUD_H, 10, 10, YELLOW);
-    } else {
-        DrawRectangle((int)rs.ball_x, (int)rs.ball_y + HUD_H, 10, 10, WHITE);
     }
+    DrawRectangle((int)rs.ball_x, (int)rs.ball_y + HUD_H, 10, 10, WHITE);
 
     int ph = pong::PADDLE_H / 100, pw = pong::PADDLE_W / 100;
     DrawRectangle(BT, (int)rs.paddle_a_y + HUD_H, pw, ph, WHITE);

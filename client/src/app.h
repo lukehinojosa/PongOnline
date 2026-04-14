@@ -30,8 +30,6 @@ struct App {
     pong::Role role = pong::Role::None;
     std::unique_ptr<pong::Transport> transport;
     pong::SimState sim;
-    pong::QuantState last_tx_state;
-    pong::QuantState last_rx_state;
 
     std::string lobby_code;
     bool peer_connected = false;
@@ -50,29 +48,23 @@ struct App {
 
     Font code_font;
 
-    std::array<pong::DecodedInput, 64> input_buf{};
     uint32_t ping_seq = 0;
     double last_ping_sent_ms = -1000.0;
     float rtt_ms = 60.f;
 
     // PLL clock synchronisation (guest only)
-    double time_offset_ms = 0.0;       // estimated: HostTime = LocalTime + time_offset_ms
-    float clock_drift_multiplier = 1.0f; // scales delta fed into accumulator
-    int8_t last_guest_dir = 0;
-
-    std::deque<Snapshot> snap_buf;
-    std::mutex snap_mutex;
+    double time_offset_ms = 0.0;
+    float clock_drift_multiplier = 1.0f;
 
     uint32_t local_tick = 0;
-    int8_t input_history[64] = {};
-    uint32_t last_schro_spawn_tick = 0; // guest: schro_spawn_tick of last AuthCollision sent
-
     double accumulator_ms = 0.0;
     double last_frame_ms = 0.0;
 
-    float render_paddle_b_y = static_cast<float>(pong::SimState{}.paddle_b_y) / 100.f;
-    double last_guest_input_ms = 0.0;
-    bool guest_ever_sent_input = false;
+    // Symmetric remote tracking for timeouts and rendering
+    float render_remote_paddle_y = static_cast<float>((pong::FIELD_H - pong::PADDLE_H) / 2) / 100.f;
+    float target_remote_paddle_y = static_cast<float>((pong::FIELD_H - pong::PADDLE_H) / 2) / 100.f;
+    double last_remote_paddle_ms = 0.0;
+    bool remote_ever_sent_paddle = false;
 
     RenderTexture2D render_target = {};
 };

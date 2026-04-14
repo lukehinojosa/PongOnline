@@ -9,8 +9,9 @@ namespace pong {
 enum class MsgType : uint8_t {
     LobbyOffer = 0x01,
     LobbyCode = 0x02,
-    Input = 0x10,
-    GameState = 0x20,
+    Input = 0x10,       // deprecated — superseded by PaddleState
+    PaddleState = 0x11, // absolute paddle_y + tick; replaces Input
+    GameState = 0x20,   // deprecated — dead code once both sides use PaddleState
     Reconcile = 0x21,
     Ping = 0x30,
     Pong = 0x31,
@@ -79,8 +80,9 @@ struct AuthCollisionMsg {
     uint8_t msg_id = static_cast<uint8_t>(MsgType::AuthCollision);
     uint32_t tick;
     uint8_t did_hit; // 1 for hit, 0 for miss
+    uint8_t side;    // 0 = Host paddle, 1 = Guest paddle
 };
-static_assert(sizeof(AuthCollisionMsg) == 6);
+static_assert(sizeof(AuthCollisionMsg) == 7);
 
 // Bidirectional; graceful shutdown or error
 struct DisconnectMsg {
