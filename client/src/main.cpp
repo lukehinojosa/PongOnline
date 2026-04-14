@@ -114,12 +114,16 @@ static void main_loop() {
             }
 
             // PLL tick-pacing (guest only)
-            if (g_app.role == pong::Role::Guest) {
-                uint32_t rtt_ticks = static_cast<uint32_t>(g_app.rtt_ms / TICK_MS);
-                uint32_t target_tick = g_app.sim.tick + rtt_ticks + 1;
-                int tick_diff = static_cast<int>(target_tick) - static_cast<int>(g_app.local_tick);
-                if (tick_diff > 1) g_app.clock_drift_multiplier = 1.1f;
-                else if (tick_diff < -1) g_app.clock_drift_multiplier = 0.9f;
+            if (g_app.role == pong::Role::Guest && g_app.remote_ever_sent_paddle) {
+                // The host's tick right NOW is the tick they sent + the 1-way flight time
+                uint32_t one_way_ticks = static_cast<uint32_t>((g_app.rtt_ms / 2.0f) / TICK_MS);
+                uint32_t target_tick = g_app.latest_remote_tick + one_way_ticks;
+
+                // Compare the true target to our simulation
+                int tick_diff = static_cast<int>(target_tick) - static_cast<int>(g_app.sim.tick);
+
+                if (tick_diff > 1) g_app.clock_drift_multiplier = 1.1f; // Speed up
+                else if (tick_diff < -1) g_app.clock_drift_multiplier = 0.9f; // Slow down
                 else g_app.clock_drift_multiplier = 1.0f;
 
                 if (now - g_app.last_ping_sent_ms >= PING_INTERVAL_MS) {

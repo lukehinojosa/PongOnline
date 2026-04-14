@@ -65,6 +65,7 @@ struct App {
     float target_remote_paddle_y = static_cast<float>((pong::FIELD_H - pong::PADDLE_H) / 2) / 100.f;
     double last_remote_paddle_ms = 0.0;
     bool remote_ever_sent_paddle = false;
+    uint32_t latest_remote_tick = 0;
 
     RenderTexture2D render_target = {};
 };

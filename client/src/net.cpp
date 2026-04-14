@@ -95,6 +95,10 @@ void start_as_guest(const std::string& code) {
                     g_app.local_tick = 0;
                     g_app.sim = pong::SimState{};
                 }
+
+                // Track the highest tick seen from the host
+                g_app.latest_remote_tick = std::max(g_app.latest_remote_tick, ps.tick);
+
                 g_app.sim.paddle_a_y = ps.paddle_y;
                 g_app.target_remote_paddle_y = static_cast<float>(ps.paddle_y) / 100.f;
                 g_app.last_remote_paddle_ms = now_ms();
