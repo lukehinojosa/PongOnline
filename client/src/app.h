@@ -20,6 +20,10 @@ struct RenderState {
     float ball_x = 0.f, ball_y = 0.f;
     float paddle_a_y = 0.f, paddle_b_y = 0.f;
     uint8_t score_a = 0, score_b = 0;
+
+    // Speculative State
+    bool is_split = false;
+    float ghost_ball_x = 0.f, ghost_ball_y = 0.f;
 };
 
 struct App {

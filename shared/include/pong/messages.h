@@ -15,6 +15,7 @@ enum class MsgType : uint8_t {
     Ping = 0x30,
     Pong = 0x31,
     Username = 0x40,
+    AuthCollision = 0x50,
     Disconnect = 0xFF,
 };
 
@@ -71,6 +72,13 @@ struct PongMsg {
     uint32_t client_ts;
 };
 static_assert(sizeof(PongMsg) == 9);
+
+struct AuthCollisionMsg {
+    uint8_t msg_id = static_cast<uint8_t>(MsgType::AuthCollision);
+    uint32_t tick;
+    uint8_t did_hit; // 1 for hit, 0 for miss
+};
+static_assert(sizeof(AuthCollisionMsg) == 6);
 
 // Bidirectional; graceful shutdown or error
 struct DisconnectMsg {

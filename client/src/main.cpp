@@ -120,7 +120,14 @@ static void main_loop() {
                     guest_dir = 1;
             }
 
-            g_app.accumulator_ms += delta;
+            // TODO: In a fully distributed authority model, the wait logic should stop the accumulator_ms.
+            // For now, if the ball is out of bounds, we will pause accumulator_ms adding up.
+            if (g_app.sim.ball_x < 0 || g_app.sim.ball_x > pong::FIELD_W) {
+                // Ball is out of bounds, we pause accumulation until AuthCollision is received.
+            } else {
+                g_app.accumulator_ms += delta;
+            }
+
             int ticks_run = 0;
             while (g_app.accumulator_ms >= TICK_MS && ticks_run < MAX_TICKS_FRAME) {
                 if (g_app.role == pong::Role::Host) {

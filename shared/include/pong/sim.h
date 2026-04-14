@@ -49,6 +49,7 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
         s.paddle_b_y = FIELD_H - PADDLE_H;
 
     // Move ball
+    int32_t prev_ball_x = s.ball_x;
     s.ball_x += s.ball_vx;
     s.ball_y += s.ball_vy;
 
@@ -62,38 +63,25 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
         s.ball_vy = -s.ball_vy;
     }
 
-    // Paddle A (left) collision
-    if (s.ball_x <= PADDLE_W &&
-        s.ball_y + BALL_SIZE >= s.paddle_a_y &&
-        s.ball_y <= s.paddle_a_y + PADDLE_H)
-    {
-        s.ball_x = PADDLE_W;
-        s.ball_vx = -s.ball_vx;
+    // --- STRICT FACE COLLISIONS ---
+    int32_t a_face = PADDLE_W;
+    int32_t b_face = FIELD_W - PADDLE_W - BALL_SIZE;
+
+    // Paddle A (Host) Collision Check
+    if (prev_ball_x > a_face && s.ball_x <= a_face) {
+        // Ball crossed the threshold this tick. Did it hit the paddle?
+        if (s.ball_y + BALL_SIZE >= s.paddle_a_y && s.ball_y <= s.paddle_a_y + PADDLE_H) {
+            s.ball_x = a_face; // Snap to the exact bounce coordinate
+            s.ball_vx = -s.ball_vx;
+        }
     }
 
-    // Paddle B (right) collision
-    if (s.ball_x + BALL_SIZE >= FIELD_W - PADDLE_W &&
-        s.ball_y + BALL_SIZE >= s.paddle_b_y &&
-        s.ball_y <= s.paddle_b_y + PADDLE_H)
-    {
-        s.ball_x = FIELD_W - PADDLE_W - BALL_SIZE;
-        s.ball_vx = -s.ball_vx;
-    }
-
-    // Scoring
-    if (s.ball_x < 0) {
-        s.score_b++;
-        s.ball_x = FIELD_W / 2;
-        s.ball_y = FIELD_H / 2;
-        s.ball_vx = BALL_SPEED;
-        s.ball_vy = BALL_SPEED;
-    }
-    if (s.ball_x > FIELD_W) {
-        s.score_a++;
-        s.ball_x = FIELD_W / 2;
-        s.ball_y = FIELD_H / 2;
-        s.ball_vx = -BALL_SPEED;
-        s.ball_vy = BALL_SPEED;
+    // Paddle B (Guest) Collision Check
+    if (prev_ball_x < b_face && s.ball_x >= b_face) {
+        if (s.ball_y + BALL_SIZE >= s.paddle_b_y && s.ball_y <= s.paddle_b_y + PADDLE_H) {
+            s.ball_x = b_face; // Snap to exact bounce coordinate
+            s.ball_vx = -s.ball_vx;
+        }
     }
 
     s.tick++;

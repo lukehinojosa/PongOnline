@@ -66,6 +66,11 @@ RenderState compute_render_state() {
     rs.ball_y = (float)g_app.sim.ball_y / 100.f;
     rs.paddle_a_y = (float)g_app.sim.paddle_a_y / 100.f;
     rs.paddle_b_y = (float)g_app.sim.paddle_b_y / 100.f;
+
+    // Copy speculative state
+    rs.is_split = g_app.sim.ball_x < 0 || g_app.sim.ball_x > pong::FIELD_W; // Basic approximation for now
+    // In a fully developed version, `is_split`, `ghost_ball_x`, `ghost_ball_y` would be populated from the simulation/app logic.
+
     return rs;
 }
 
@@ -100,7 +105,14 @@ void draw_game(const RenderState& rs) {
     for (int y = HUD_H; y < SCREEN_H - BT; y += 30)
         DrawRectangle(mid - 2, y, 4, 18, GRAY);
 
+    // Draw regular ball (local prediction)
     DrawRectangle((int)rs.ball_x, (int)rs.ball_y + HUD_H, 10, 10, WHITE);
+
+    // Draw ghost ball (the alternate reality)
+    if (rs.is_split) {
+        DrawRectangleLines((int)rs.ghost_ball_x, (int)rs.ghost_ball_y + HUD_H, 10, 10, WHITE);
+    }
+
     int ph = pong::PADDLE_H / 100, pw = pong::PADDLE_W / 100;
     DrawRectangle(BT, (int)rs.paddle_a_y + HUD_H, pw, ph, WHITE);
     DrawRectangle(SCREEN_W - pw - BT, (int)rs.paddle_b_y + HUD_H, pw, ph, WHITE);
