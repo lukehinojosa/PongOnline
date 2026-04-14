@@ -142,17 +142,15 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
             }
         }
 
-        // Schrödinger ball exits — definitive goal; round resolves immediately
+        // Schrödinger ball reaches x bounds — freeze and wait for authorization
         if (s.s_ball_x < 0) {
-            s.score_b++;
-            s.has_schrodinger = false;
-            s.ball_x  = FIELD_W / 2; s.ball_y  = FIELD_H / 2;
-            s.ball_vx = BALL_SPEED;   s.ball_vy = BALL_SPEED;
+            s.s_ball_x = -1;  // Keep it parked just off-screen
+            s.s_ball_vx = 0;
+            s.s_ball_vy = 0;
         } else if (s.s_ball_x > FIELD_W) {
-            s.score_a++;
-            s.has_schrodinger = false;
-            s.ball_x  = FIELD_W / 2; s.ball_y  = FIELD_H / 2;
-            s.ball_vx = -BALL_SPEED;  s.ball_vy = BALL_SPEED;
+            s.s_ball_x = FIELD_W + 1;
+            s.s_ball_vx = 0;
+            s.s_ball_vy = 0;
         }
     }
 
