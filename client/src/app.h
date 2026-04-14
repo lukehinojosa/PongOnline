@@ -54,6 +54,10 @@ struct App {
     uint32_t ping_seq = 0;
     double last_ping_sent_ms = -1000.0;
     float rtt_ms = 60.f;
+
+    // PLL clock synchronisation (guest only)
+    double time_offset_ms = 0.0;       // estimated: HostTime = LocalTime + time_offset_ms
+    float clock_drift_multiplier = 1.0f; // scales delta fed into accumulator
     int8_t last_guest_dir = 0;
 
     std::deque<Snapshot> snap_buf;

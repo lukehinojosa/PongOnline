@@ -84,6 +84,24 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
         }
     }
 
+    // Goal detection: ball exits the field, score and reset.
+    // Serve toward the player who just scored so they see it approaching.
+    if (s.ball_x < 0) {
+        // Host missed — guest scores
+        s.score_b++;
+        s.ball_x  = FIELD_W / 2;
+        s.ball_y  = FIELD_H / 2;
+        s.ball_vx = BALL_SPEED;   // serves rightward, toward guest
+        s.ball_vy = BALL_SPEED;
+    } else if (s.ball_x > FIELD_W) {
+        // Guest missed — host scores
+        s.score_a++;
+        s.ball_x  = FIELD_W / 2;
+        s.ball_y  = FIELD_H / 2;
+        s.ball_vx = -BALL_SPEED;  // serves leftward, toward host
+        s.ball_vy = BALL_SPEED;
+    }
+
     s.tick++;
 }
 

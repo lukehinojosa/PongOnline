@@ -120,13 +120,32 @@ static void main_loop() {
                     guest_dir = 1;
             }
 
-            // TODO: In a fully distributed authority model, the wait logic should stop the accumulator_ms.
-            // For now, if the ball is out of bounds, we will pause accumulator_ms adding up.
-            if (g_app.sim.ball_x < 0 || g_app.sim.ball_x > pong::FIELD_W) {
-                // Ball is out of bounds, we pause accumulation until AuthCollision is received.
-            } else {
-                g_app.accumulator_ms += delta;
+            // PLL tick-pacing (guest only): keep local_tick running at ~RTT/TICK_MS ticks
+            // ahead of the last known host tick so inputs arrive on time.
+            // The host always uses multiplier 1.0 (set to default in App).
+            if (g_app.role == pong::Role::Guest) {
+                uint32_t rtt_ticks = static_cast<uint32_t>(g_app.rtt_ms / TICK_MS);
+                uint32_t target_tick = g_app.sim.tick + rtt_ticks + 1;
+                int tick_diff = static_cast<int>(target_tick) - static_cast<int>(g_app.local_tick);
+
+                if (tick_diff > 1) {
+                    g_app.clock_drift_multiplier = 1.1f;  // behind target — speed up 10 %
+                } else if (tick_diff < -1) {
+                    g_app.clock_drift_multiplier = 0.9f;  // ahead of target — slow down 10 %
+                } else {
+                    g_app.clock_drift_multiplier = 1.0f;  // within ±1 tick deadband — coast
+                }
+
+                // Guest is the heartbeat source; send a ping on the configured interval.
+                if (now - g_app.last_ping_sent_ms >= PING_INTERVAL_MS) {
+                    g_app.last_ping_sent_ms = now;
+                    uint32_t ts32 = static_cast<uint32_t>(static_cast<uint64_t>(now) & 0xFFFFFFFF);
+                    uint8_t pbuf[pong::PING_BYTES];
+                    g_app.transport->send({ pbuf, static_cast<size_t>(pong::encode_ping(pbuf, g_app.ping_seq++, ts32)) });
+                }
             }
+
+            g_app.accumulator_ms += delta * g_app.clock_drift_multiplier;
 
             int ticks_run = 0;
             while (g_app.accumulator_ms >= TICK_MS && ticks_run < MAX_TICKS_FRAME) {

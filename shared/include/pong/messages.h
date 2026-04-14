@@ -70,8 +70,9 @@ struct PongMsg {
     uint8_t msg_id = static_cast<uint8_t>(MsgType::Pong);
     uint32_t seq;
     uint32_t client_ts;
+    uint32_t server_ts; // Host's timestamp, enables NTP-style clock offset on guest
 };
-static_assert(sizeof(PongMsg) == 9);
+static_assert(sizeof(PongMsg) == 13);
 
 struct AuthCollisionMsg {
     uint8_t msg_id = static_cast<uint8_t>(MsgType::AuthCollision);

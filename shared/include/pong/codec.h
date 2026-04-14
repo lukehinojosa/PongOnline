@@ -202,7 +202,7 @@ inline bool decode_input(std::span<const uint8_t> buf, DecodedInput& out) {
 // Ping / Pong codec
 // Wire format: raw packed struct (9 bytes each).
 static constexpr int PING_BYTES = 9;
-static constexpr int PONG_BYTES = 9;
+static constexpr int PONG_BYTES = 13;
 
 inline int encode_ping(uint8_t* buf, uint32_t seq, uint32_t client_ts) {
     PingMsg m;
@@ -222,21 +222,23 @@ inline bool decode_ping(std::span<const uint8_t> buf, uint32_t& seq, uint32_t& c
     return true;
 }
 
-inline int encode_pong(uint8_t* buf, uint32_t seq, uint32_t client_ts) {
+inline int encode_pong(uint8_t* buf, uint32_t seq, uint32_t client_ts, uint32_t server_ts) {
     PongMsg m;
     m.seq = seq;
     m.client_ts = client_ts;
+    m.server_ts = server_ts;
     std::memcpy(buf, &m, sizeof(m));
     return sizeof(m);
 }
 
-inline bool decode_pong(std::span<const uint8_t> buf, uint32_t& seq, uint32_t& client_ts) {
+inline bool decode_pong(std::span<const uint8_t> buf, uint32_t& seq, uint32_t& client_ts, uint32_t& server_ts) {
     if (buf.size() < sizeof(PongMsg) || buf[0] != static_cast<uint8_t>(MsgType::Pong))
         return false;
     PongMsg m;
     std::memcpy(&m, buf.data(), sizeof(m));
     seq = m.seq;
     client_ts = m.client_ts;
+    server_ts = m.server_ts;
     return true;
 }
 

@@ -40,13 +40,14 @@ void start_as_host() {
                 g_app.last_guest_input_ms = now_ms();
                 g_app.guest_ever_sent_input = true;
             }
-        } else if (type == pong::MsgType::Pong) {
+        } else if (type == pong::MsgType::Ping) {
+            // Guest is the time-client; host echoes the ping back with its own timestamp.
             uint32_t seq, client_ts;
-            if (pong::decode_pong(buf, seq, client_ts) && seq == g_app.ping_seq - 1) {
-                uint32_t now32 = static_cast<uint32_t>(static_cast<uint64_t>(now_ms()) & 0xFFFFFFFF);
-                double rtt = static_cast<double>((now32 - client_ts) & 0xFFFFFFFF);
-                g_app.rtt_ms = RTT_EWMA_ALPHA * static_cast<float>(rtt)
-                    + (1.f - RTT_EWMA_ALPHA) * g_app.rtt_ms;
+            if (pong::decode_ping(buf, seq, client_ts)) {
+                uint32_t server_ts = static_cast<uint32_t>(static_cast<uint64_t>(now_ms()) & 0xFFFFFFFF);
+                uint8_t pbuf[pong::PONG_BYTES];
+                int len = pong::encode_pong(pbuf, seq, client_ts, server_ts);
+                g_app.transport->send({ pbuf, static_cast<size_t>(len) });
             }
         } else if (type == pong::MsgType::Username) {
             std::string name;
@@ -116,12 +117,25 @@ void start_as_guest(const std::string& code) {
                 if (g_app.sim.score_a >= pong::WIN_SCORE) { g_app.game_over = true; g_app.winner = 1; }
                 else if (g_app.sim.score_b >= pong::WIN_SCORE) { g_app.game_over = true; g_app.winner = 2; }
             }
-        } else if (type == pong::MsgType::Ping) {
-            uint32_t seq, client_ts;
-            if (pong::decode_ping(buf, seq, client_ts)) {
-                uint8_t pbuf[pong::PONG_BYTES];
-                int len = pong::encode_pong(pbuf, seq, client_ts);
-                g_app.transport->send({ pbuf, static_cast<size_t>(len) });
+        } else if (type == pong::MsgType::Pong) {
+            // NTP-style clock offset + RTT measurement.
+            // offset = ServerTime - (T0 + RTT/2)  →  HostTime ≈ LocalTime + offset
+            uint32_t seq, client_ts, server_ts;
+            if (pong::decode_pong(buf, seq, client_ts, server_ts) && seq == g_app.ping_seq - 1) {
+                uint32_t now32 = static_cast<uint32_t>(static_cast<uint64_t>(now_ms()) & 0xFFFFFFFF);
+                double rtt = static_cast<double>((now32 - client_ts) & 0xFFFFFFFF);
+
+                g_app.rtt_ms = RTT_EWMA_ALPHA * static_cast<float>(rtt)
+                    + (1.f - RTT_EWMA_ALPHA) * g_app.rtt_ms;
+
+                double one_way = rtt / 2.0;
+                double estimated_server_now = static_cast<double>(server_ts) + one_way;
+                double raw_offset = estimated_server_now - static_cast<double>(now32);
+
+                // Smooth the offset to reject jitter; first sample sets it directly.
+                g_app.time_offset_ms = (g_app.time_offset_ms == 0.0)
+                    ? raw_offset
+                    : (0.8 * g_app.time_offset_ms + 0.2 * raw_offset);
             }
         } else if (type == pong::MsgType::Username) {
             std::string name;
@@ -168,12 +182,4 @@ void game_tick() {
     int slen = pong::encode_game_state(sbuf, g_app.sim, g_app.last_tx_state, dmask);
     g_app.transport->send({ sbuf, static_cast<size_t>(slen) });
     g_app.last_tx_state = cur_q;
-
-    double t = now_ms();
-    if (t - g_app.last_ping_sent_ms >= PING_INTERVAL_MS) {
-        g_app.last_ping_sent_ms = t;
-        uint32_t ts32 = static_cast<uint32_t>(static_cast<uint64_t>(t) & 0xFFFFFFFF);
-        uint8_t pbuf[pong::PING_BYTES];
-        g_app.transport->send({ pbuf, static_cast<size_t>(pong::encode_ping(pbuf, g_app.ping_seq++, ts32)) });
-    }
 }
