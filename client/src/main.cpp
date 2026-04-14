@@ -113,14 +113,19 @@ static void main_loop() {
                 if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S)) guest_dir = 1;
             }
 
+            int current_max_ticks = MAX_TICKS_FRAME;
+
             // PLL tick-pacing (guest only)
             if (g_app.role == pong::Role::Guest && g_app.remote_ever_sent_paddle) {
                 // The host's tick right NOW is the tick they sent + the 1-way flight time
                 uint32_t one_way_ticks = static_cast<uint32_t>((g_app.rtt_ms / 2.0f) / TICK_MS);
                 uint32_t target_tick = g_app.latest_remote_tick + one_way_ticks;
-
-                // Compare the true target to our simulation
                 int tick_diff = static_cast<int>(target_tick) - static_cast<int>(g_app.sim.tick);
+
+                if (tick_diff > 4) {
+                    g_app.accumulator_ms += (tick_diff - 1) * TICK_MS;
+                    current_max_ticks = tick_diff + 1; // Temporarily lift the frame limit
+                }
 
                 if (tick_diff > 1) g_app.clock_drift_multiplier = 1.1f; // Speed up
                 else if (tick_diff < -1) g_app.clock_drift_multiplier = 0.9f; // Slow down
@@ -137,7 +142,7 @@ static void main_loop() {
             g_app.accumulator_ms += delta * g_app.clock_drift_multiplier;
             int ticks_run = 0;
 
-            while (g_app.accumulator_ms >= TICK_MS && ticks_run < MAX_TICKS_FRAME) {
+            while (g_app.accumulator_ms >= TICK_MS && ticks_run < current_max_ticks) {
                 if (g_app.role == pong::Role::Host) {
                     game_tick();
                 } else {
