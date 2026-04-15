@@ -94,6 +94,7 @@ void start_as_guest(const std::string& code) {
                     g_app.winner = 0;
                     g_app.local_tick = 0;
                     g_app.sim = pong::SimState{};
+                    g_app.latest_remote_tick = 0;
                 }
 
                 // Track the highest tick seen from the host

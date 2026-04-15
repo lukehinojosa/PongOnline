@@ -117,18 +117,28 @@ static void main_loop() {
 
             // PLL tick-pacing (guest only)
             if (g_app.role == pong::Role::Guest && g_app.remote_ever_sent_paddle) {
-                // The host's tick right NOW is the tick they sent + the 1-way flight time
+
+                // The Hard Deficit
+                int hard_deficit = static_cast<int>(g_app.latest_remote_tick) - static_cast<int>(g_app.sim.tick);
+
+                // Only snap if fallen significantly behind
+                if (hard_deficit > 4) {
+                    double required_ms = hard_deficit * TICK_MS;
+                    // Prevent double-dipping if delta already captured the lag spike
+                    if (g_app.accumulator_ms < required_ms) {
+                        g_app.accumulator_ms = required_ms;
+                    }
+                    current_max_ticks = hard_deficit + MAX_TICKS_FRAME;
+                }
+
+                // The Soft Deficit
                 uint32_t one_way_ticks = static_cast<uint32_t>((g_app.rtt_ms / 2.0f) / TICK_MS);
                 uint32_t target_tick = g_app.latest_remote_tick + one_way_ticks;
                 int tick_diff = static_cast<int>(target_tick) - static_cast<int>(g_app.sim.tick);
 
-                if (tick_diff > 4) {
-                    g_app.accumulator_ms += (tick_diff - 1) * TICK_MS;
-                    current_max_ticks = tick_diff + 1; // Temporarily lift the frame limit
-                }
-
-                if (tick_diff > 1) g_app.clock_drift_multiplier = 1.1f; // Speed up
-                else if (tick_diff < -1) g_app.clock_drift_multiplier = 0.9f; // Slow down
+                // Use the drift multiplier to gently catch up.
+                if (tick_diff > 1) g_app.clock_drift_multiplier = 1.1f;
+                else if (tick_diff < -1) g_app.clock_drift_multiplier = 0.9f;
                 else g_app.clock_drift_multiplier = 1.0f;
 
                 if (now - g_app.last_ping_sent_ms >= PING_INTERVAL_MS) {
@@ -163,8 +173,16 @@ static void main_loop() {
                         pong::resolve_schrodinger(g_app.sim, did_hit, 1);
                     }
 
-                    if (g_app.sim.score_a >= pong::WIN_SCORE) { g_app.game_over = true; g_app.winner = 1; }
-                    else if (g_app.sim.score_b >= pong::WIN_SCORE) { g_app.game_over = true; g_app.winner = 2; }
+                    if (g_app.sim.score_a >= pong::WIN_SCORE) {
+                        g_app.game_over = true;
+                        g_app.winner = 1;
+                        break;
+                    }
+                    else if (g_app.sim.score_b >= pong::WIN_SCORE) {
+                        g_app.game_over = true;
+                        g_app.winner = 2;
+                        break;
+                    }
 
                     uint8_t pbuf[pong::PADDLE_STATE_MAX_BYTES];
                     int plen = pong::encode_paddle_state(pbuf, g_app.sim.tick, g_app.sim.paddle_b_y);
