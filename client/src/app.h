@@ -68,6 +68,15 @@ struct App {
     uint32_t latest_remote_tick = 0;
 
     RenderTexture2D render_target = {};
+
+    // Packet loss resilience for one-shot events
+    struct AuthResend {
+        bool active = false;
+        uint32_t spawn_tick = 0;
+        uint8_t did_hit = 0;
+        uint8_t side = 0;
+        int frames_left = 0;
+    } auth_resend;
 };
 
 extern App g_app;

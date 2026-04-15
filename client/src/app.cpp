@@ -38,4 +38,6 @@ void reset_app() {
     // username_edit and signaling_edit are intentionally not reset
     g_app.username_edit.focused = false;
     g_app.signaling_edit.focused = false;
+
+    g_app.auth_resend = {};
 }

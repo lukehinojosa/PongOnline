@@ -171,6 +171,9 @@ static void main_loop() {
                         g_app.transport->send({ auth_buf, static_cast<size_t>(alen) });
 
                         pong::resolve_schrodinger(g_app.sim, did_hit, 1);
+
+                        // Queue redundant transmissions for Guest
+                        g_app.auth_resend = { true, g_app.sim.schro_spawn_tick, static_cast<uint8_t>(did_hit ? 1 : 0), 1, 30 };
                     }
 
                     if (g_app.sim.score_a >= pong::WIN_SCORE) {
@@ -187,6 +190,17 @@ static void main_loop() {
                     uint8_t pbuf[pong::PADDLE_STATE_MAX_BYTES];
                     int plen = pong::encode_paddle_state(pbuf, g_app.sim.tick, g_app.sim.paddle_b_y);
                     g_app.transport->send({ pbuf, static_cast<size_t>(plen) });
+
+                    // Broadcast the collision event repeatedly
+                    if (g_app.auth_resend.active && g_app.auth_resend.frames_left > 0) {
+                        uint8_t auth_buf[pong::AUTH_COLLISION_BYTES];
+                        int alen = pong::encode_auth_collision(auth_buf, g_app.auth_resend.spawn_tick, g_app.auth_resend.did_hit, g_app.auth_resend.side);
+                        g_app.transport->send({ auth_buf, static_cast<size_t>(alen) });
+                        g_app.auth_resend.frames_left--;
+                    } else {
+                        g_app.auth_resend.active = false;
+                    }
+
                     ++g_app.local_tick;
                 }
                 g_app.accumulator_ms -= TICK_MS;
