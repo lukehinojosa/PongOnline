@@ -30,6 +30,12 @@ RenderState compute_render_state() {
     if (rs.is_split) {
         rs.ghost_ball_x = (float)g_app.sim.s_ball_x / 100.f;
         rs.ghost_ball_y = (float)g_app.sim.s_ball_y / 100.f;
+
+        // Determine if the local player is the non-goaltender awaiting auth
+        if ((g_app.role == pong::Role::Guest && g_app.sim.schro_side == 0) ||
+            (g_app.role == pong::Role::Host && g_app.sim.schro_side == 1)) {
+            rs.is_waiting_auth_bounce = true;
+        }
     }
     return rs;
 }
@@ -70,7 +76,9 @@ void draw_game(const RenderState& rs) {
     if (rs.is_split) {
         DrawRectangle((int)rs.ghost_ball_x, (int)rs.ghost_ball_y + HUD_H, 10, 10, YELLOW);
     }
-    DrawRectangle((int)rs.ball_x, (int)rs.ball_y + HUD_H, 10, 10, WHITE);
+    // Yellow until auth bounce
+    Color main_ball_color = rs.is_waiting_auth_bounce ? YELLOW : WHITE;
+    DrawRectangle((int)rs.ball_x, (int)rs.ball_y + HUD_H, 10, 10, main_ball_color);
 
     int ph = pong::PADDLE_H / 100, pw = pong::PADDLE_W / 100;
     DrawRectangle(BT, (int)rs.paddle_a_y + HUD_H, pw, ph, WHITE);

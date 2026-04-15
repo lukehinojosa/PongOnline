@@ -24,6 +24,7 @@ struct RenderState {
     // Speculative State
     bool is_split = false;
     float ghost_ball_x = 0.f, ghost_ball_y = 0.f;
+    bool is_waiting_auth_bounce = false;
 };
 
 struct App {
