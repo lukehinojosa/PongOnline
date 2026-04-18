@@ -79,7 +79,7 @@ static_assert(sizeof(PongMsg) == 13);
 struct AuthCollisionMsg {
     uint8_t msg_id = static_cast<uint8_t>(MsgType::AuthCollision);
     uint32_t tick;
-    uint8_t did_hit; // 1 for hit, 0 for miss
+    uint8_t hit_type; // 1 for hit, 0 for miss
     uint8_t side;    // 0 = Host paddle, 1 = Guest paddle
 };
 static_assert(sizeof(AuthCollisionMsg) == 7);

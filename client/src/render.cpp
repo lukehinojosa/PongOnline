@@ -28,8 +28,11 @@ RenderState compute_render_state() {
 
     rs.is_split = g_app.sim.has_schrodinger;
     if (rs.is_split) {
-        rs.ghost_ball_x = (float)g_app.sim.s_ball_x / 100.f;
-        rs.ghost_ball_y = (float)g_app.sim.s_ball_y / 100.f;
+        for(int i = 0; i < 4; i++) {
+            rs.ghost_x[i] = (float)g_app.sim.s_x[i] / 100.f;
+            rs.ghost_y[i] = (float)g_app.sim.s_y[i] / 100.f;
+        }
+        rs.opt_hit_type = g_app.sim.opt_hit_type;
 
         // Determine if the local player is the non-goaltender awaiting auth
         if ((g_app.role == pong::Role::Guest && g_app.sim.schro_side == 0) ||
@@ -74,7 +77,11 @@ void draw_game(const RenderState& rs) {
     // Yellow ghost = Schrödinger ball (the disputed "scored" timeline).
     // Always draw the real ball; it bounces optimistically regardless.
     if (rs.is_split) {
-        DrawRectangle((int)rs.ghost_ball_x, (int)rs.ghost_ball_y + HUD_H, 10, 10, YELLOW);
+        for(int i = 0; i < 4; i++) {
+            if (i == rs.opt_hit_type)
+                continue; // Real ball is already drawn on this path
+            DrawRectangle((int)rs.ghost_x[i], (int)rs.ghost_y[i] + HUD_H, 10, 10, YELLOW);
+        }
     }
     // Yellow until auth bounce
     Color main_ball_color = rs.is_waiting_auth_bounce ? YELLOW : WHITE;

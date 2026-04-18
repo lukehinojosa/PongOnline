@@ -15,6 +15,21 @@ static constexpr int BALL_SIZE = 1000; // 10px * 100
 static constexpr int BALL_SPEED = 500; // 5px/tick * 100
 static constexpr int PADDLE_SPD = 400; // 4px/tick * 100
 static constexpr int WIN_SCORE = 7;
+static constexpr int BALL_SPEED_DIAG = 353; // 500 * sqrt(2)/2 for 45-degree angles
+
+inline uint8_t get_hit_type(int32_t spawn_y, int32_t paddle_y) {
+    int32_t center_y = spawn_y + BALL_SIZE / 2;
+    int32_t p_top = paddle_y;
+    int32_t p_bot = paddle_y + PADDLE_H;
+
+    // 0 = miss, 1 = up, 2 = mid, 3 = down
+    if (spawn_y + BALL_SIZE < p_top || spawn_y > p_bot) return 0;
+
+    int32_t third = PADDLE_H / 3;
+    if (center_y < p_top + third) return 1;
+    if (center_y > p_bot - third) return 3;
+    return 2;
+}
 
 struct SimState {
     int32_t ball_x = FIELD_W / 2;
@@ -32,17 +47,18 @@ struct SimState {
     // The real ball optimistically bounces; the schro ball continues in the
     // scoring direction. Cleared by resolve_schrodinger() on AuthCollision.
     bool has_schrodinger = false;
-    int32_t s_ball_x = 0;
-    int32_t s_ball_y = 0;
-    int32_t s_ball_vx = 0;
-    int32_t s_ball_vy = 0;
+    uint8_t opt_hit_type = 0;
+    int32_t s_x[4] = {0};
+    int32_t s_y[4] = {0};
+    int32_t s_vx[4] = {0};
+    int32_t s_vy[4] = {0};
     uint32_t schro_spawn_tick = 0; // tick at which schro was created
     int32_t schro_spawn_y = 0;    // ball_y at spawn (for hit-detection)
     uint8_t schro_side = 0;       // 0 = Host paddle, 1 = Guest paddle
 
     bool has_pending_auth = false;
     uint32_t pending_auth_tick = 0;
-    uint8_t pending_auth_did_hit = 0;
+    uint8_t pending_auth_hit_type = 0;
     uint8_t pending_auth_side = 0;
 };
 
@@ -52,34 +68,23 @@ inline int32_t serve_vx(const SimState& s) {
     return ((s.score_a + s.score_b) % 2 == 0) ? BALL_SPEED : -BALL_SPEED;
 }
 
-    // Called by either client when an AuthCollisionMsg arrives.
-    //   side    — which paddle this resolves (0 = Host, 1 = Guest)
-    //   did_hit — true if the authoritative side confirms a hit
-    //
-    // did_hit=true  → real ball already on the optimistic bounce path; just clear schro.
-    // did_hit=false → the paddle missed; award the point to the other side and
-    //                 reset the ball with a deterministic serve direction.
-    inline void resolve_schrodinger(SimState& s, bool did_hit, uint8_t side) {
+// Called by either client when an AuthCollisionMsg arrives.
+inline void resolve_schrodinger(SimState& s, uint8_t actual_hit_type, uint8_t side) {
     if (!s.has_schrodinger) return;
 
-    if (did_hit) {
-        // Successful block: Delete the ghost timeline.
-        // The real ball is already optimistically bouncing away safely.
-        s.has_schrodinger = false;
-    } else {
-        // Missed!: The ghost timeline is the true reality.
-        // Swap the ghost ball into the real ball's place.
-        s.ball_x = s.s_ball_x;
-        s.ball_y = s.s_ball_y;
-        s.ball_vx = s.s_ball_vx;
-        s.ball_vy = s.s_ball_vy;
-
-        s.has_schrodinger = false;
+    if (actual_hit_type != s.opt_hit_type) {
+        // Prediction was wrong! Snap the real ball to the correct timeline.
+        s.ball_x = s.s_x[actual_hit_type];
+        s.ball_y = s.s_y[actual_hit_type];
+        s.ball_vx = s.s_vx[actual_hit_type];
+        s.ball_vy = s.s_vy[actual_hit_type];
     }
 
-    // Clear schro state variables
-    s.s_ball_x = 0; s.s_ball_y = 0;
-    s.s_ball_vx = 0; s.s_ball_vy = 0;
+    s.has_schrodinger = false;
+    for(int i = 0; i < 4; i++) {
+        s.s_x[i] = 0; s.s_y[i] = 0;
+        s.s_vx[i] = 0; s.s_vy[i] = 0;
+    }
 }
 
 // Advance the simulation by one tick.
@@ -152,20 +157,27 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
     if (prev_ball_x > a_face && s.ball_x <= a_face) {
         if (!s.has_schrodinger) {
             s.has_schrodinger  = true;
-            s.schro_side       = 0; // Host's paddle
-            s.s_ball_x         = s.ball_x;
-            s.s_ball_y         = s.ball_y;
-            s.s_ball_vx        = s.ball_vx; // continues left (guest scores)
-            s.s_ball_vy        = s.ball_vy;
+            s.schro_side       = 0;
             s.schro_spawn_tick = s.tick;
             s.schro_spawn_y    = s.ball_y;
 
-            // Real ball optimistically bounces right
-            s.ball_x  = a_face;
-            s.ball_vx = -s.ball_vx;
+            // 0: Miss Timeline
+            s.s_x[0] = s.ball_x;   s.s_y[0] = s.ball_y;
+            s.s_vx[0] = s.ball_vx; s.s_vy[0] = s.ball_vy;
+
+            // 1-3: Bounce Timelines
+            for(int i = 1; i <= 3; i++) { s.s_x[i] = a_face; s.s_y[i] = s.ball_y; }
+            s.s_vx[1] = BALL_SPEED_DIAG; s.s_vy[1] = -BALL_SPEED_DIAG; // Up
+            s.s_vx[2] = BALL_SPEED;      s.s_vy[2] = 0;                // Mid
+            s.s_vx[3] = BALL_SPEED_DIAG; s.s_vy[3] = BALL_SPEED_DIAG;  // Down
+
+            // Optimistically lock the main ball to the locally predicted timeline
+            s.opt_hit_type = get_hit_type(s.schro_spawn_y, s.paddle_a_y);
+            s.ball_x = s.s_x[s.opt_hit_type];   s.ball_y = s.s_y[s.opt_hit_type];
+            s.ball_vx = s.s_vx[s.opt_hit_type]; s.ball_vy = s.s_vy[s.opt_hit_type];
 
             if (s.has_pending_auth && s.pending_auth_tick == s.tick) {
-                resolve_schrodinger(s, s.pending_auth_did_hit != 0, s.pending_auth_side);
+                resolve_schrodinger(s, s.pending_auth_hit_type, s.pending_auth_side);
                 s.has_pending_auth = false;
             }
         }
@@ -176,20 +188,26 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
     if (prev_ball_x < b_face && s.ball_x >= b_face) {
         if (!s.has_schrodinger) {
             s.has_schrodinger  = true;
-            s.schro_side       = 1; // Guest's paddle
-            s.s_ball_x         = s.ball_x;
-            s.s_ball_y         = s.ball_y;
-            s.s_ball_vx        = s.ball_vx; // continues right (host scores)
-            s.s_ball_vy        = s.ball_vy;
+            s.schro_side       = 1;
             s.schro_spawn_tick = s.tick;
             s.schro_spawn_y    = s.ball_y;
 
-            // Real ball optimistically bounces left
-            s.ball_x  = b_face;
-            s.ball_vx = -s.ball_vx;
+            // 0: Miss Timeline
+            s.s_x[0] = s.ball_x;   s.s_y[0] = s.ball_y;
+            s.s_vx[0] = s.ball_vx; s.s_vy[0] = s.ball_vy;
+
+            // 1-3: Bounce Timelines
+            for(int i = 1; i <= 3; i++) { s.s_x[i] = b_face; s.s_y[i] = s.ball_y; }
+            s.s_vx[1] = -BALL_SPEED_DIAG; s.s_vy[1] = -BALL_SPEED_DIAG; // Up
+            s.s_vx[2] = -BALL_SPEED;      s.s_vy[2] = 0;                // Mid
+            s.s_vx[3] = -BALL_SPEED_DIAG; s.s_vy[3] = BALL_SPEED_DIAG;  // Down
+
+            s.opt_hit_type = get_hit_type(s.schro_spawn_y, s.paddle_b_y);
+            s.ball_x = s.s_x[s.opt_hit_type];   s.ball_y = s.s_y[s.opt_hit_type];
+            s.ball_vx = s.s_vx[s.opt_hit_type]; s.ball_vy = s.s_vy[s.opt_hit_type];
 
             if (s.has_pending_auth && s.pending_auth_tick == s.tick) {
-                resolve_schrodinger(s, s.pending_auth_did_hit != 0, s.pending_auth_side);
+                resolve_schrodinger(s, s.pending_auth_hit_type, s.pending_auth_side);
                 s.has_pending_auth = false;
             }
         }
@@ -215,29 +233,14 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
 
     // --- Schrödinger ball physics (scoring timeline) ---
     if (s.has_schrodinger) {
-        s.s_ball_x += s.s_ball_vx;
-        s.s_ball_y += s.s_ball_vy;
+        for(int i = 0; i < 4; i++) {
+            s.s_x[i] += s.s_vx[i];
+            s.s_y[i] += s.s_vy[i];
 
-        // Wall bounces
-        if (s.s_ball_y <= 0) {
-            s.s_ball_y = 0;
-            s.s_ball_vy = -s.s_ball_vy;
-        }
-        if (s.s_ball_y >= FIELD_H - BALL_SIZE) {
-            s.s_ball_y = FIELD_H - BALL_SIZE;
-            s.s_ball_vy = -s.s_ball_vy;
-        }
-
-        // Park once it exits the goal side
-        if (s.s_ball_x < -BALL_SIZE) {
-            s.s_ball_x  = -BALL_SIZE - 1;
-            s.s_ball_vx = 0;
-            s.s_ball_vy = 0;
-        }
-        if (s.s_ball_x > FIELD_W) {
-            s.s_ball_x  = FIELD_W + 1;
-            s.s_ball_vx = 0;
-            s.s_ball_vy = 0;
+            if (s.s_y[i] <= 0) {s.s_y[i] = 0; s.s_vy[i] = -s.s_vy[i]; }
+            if (s.s_y[i] >= FIELD_H - BALL_SIZE) { s.s_y[i] = FIELD_H - BALL_SIZE; s.s_vy[i] = -s.s_vy[i]; }
+            if (s.s_x[i] < -BALL_SIZE) { s.s_x[i] = -BALL_SIZE - 1; s.s_vx[i] = 0; s.s_vy[i] = 0; }
+            if (s.s_x[i] > FIELD_W) { s.s_x[i] = FIELD_W + 1; s.s_vx[i] = 0; s.s_vy[i] = 0; }
         }
     }
 

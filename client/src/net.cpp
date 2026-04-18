@@ -51,16 +51,14 @@ void start_as_host() {
             }
         } else if (type == pong::MsgType::AuthCollision) {
             uint32_t tick;
-            uint8_t did_hit, side;
-            if (pong::decode_auth_collision(buf, tick, did_hit, side)) {
+            uint8_t hit_type, side;
+            if (pong::decode_auth_collision(buf, tick, hit_type, side)) {
                 if (g_app.sim.has_schrodinger && tick == g_app.sim.schro_spawn_tick) {
-                    // Arrived on time or late: apply immediately
-                    pong::resolve_schrodinger(g_app.sim, did_hit != 0, side);
+                    pong::resolve_schrodinger(g_app.sim, hit_type, side);
                 } else if (tick >= g_app.sim.tick) {
-                    // Arrived early: buffer it for sim_tick to process
                     g_app.sim.has_pending_auth = true;
                     g_app.sim.pending_auth_tick = tick;
-                    g_app.sim.pending_auth_did_hit = did_hit;
+                    g_app.sim.pending_auth_hit_type = hit_type;
                     g_app.sim.pending_auth_side = side;
                 }
             }
@@ -118,16 +116,14 @@ void start_as_guest(const std::string& code) {
             }
         } else if (type == pong::MsgType::AuthCollision) {
             uint32_t tick;
-            uint8_t did_hit, side;
-            if (pong::decode_auth_collision(buf, tick, did_hit, side)) {
+            uint8_t hit_type, side;
+            if (pong::decode_auth_collision(buf, tick, hit_type, side)) {
                 if (g_app.sim.has_schrodinger && tick == g_app.sim.schro_spawn_tick) {
-                    // Arrived on time or late: apply immediately
-                    pong::resolve_schrodinger(g_app.sim, did_hit != 0, side);
+                    pong::resolve_schrodinger(g_app.sim, hit_type, side);
                 } else if (tick >= g_app.sim.tick) {
-                    // Arrived early: buffer it for sim_tick to process
                     g_app.sim.has_pending_auth = true;
                     g_app.sim.pending_auth_tick = tick;
-                    g_app.sim.pending_auth_did_hit = did_hit;
+                    g_app.sim.pending_auth_hit_type = hit_type;
                     g_app.sim.pending_auth_side = side;
                 }
             }
@@ -163,19 +159,13 @@ void game_tick() {
 
     // Host hit detection trigger
     if (!had_schro && g_app.sim.has_schrodinger && g_app.sim.schro_side == 0) {
-        const int32_t spawn_y = g_app.sim.schro_spawn_y;
-        const int32_t paddle = g_app.sim.paddle_a_y;
-        const bool did_hit = (spawn_y + pong::BALL_SIZE >= paddle - pong::BALL_SIZE) &&
-                             (spawn_y <= paddle + pong::PADDLE_H + pong::BALL_SIZE);
-
+        uint8_t hit_type = pong::get_hit_type(g_app.sim.schro_spawn_y, g_app.sim.paddle_a_y);
         uint8_t auth_buf[pong::AUTH_COLLISION_BYTES];
-        int alen = pong::encode_auth_collision(auth_buf, g_app.sim.schro_spawn_tick, did_hit ? 1u : 0u, 0);
+        int alen = pong::encode_auth_collision(auth_buf, g_app.sim.schro_spawn_tick, hit_type, 0);
         g_app.transport->send({ auth_buf, static_cast<size_t>(alen) });
 
-        pong::resolve_schrodinger(g_app.sim, did_hit, 0);
-
-        // Queue redundant transmissions (e.g., 15 ticks / ~250ms of safety)
-        g_app.auth_resend = { true, g_app.sim.schro_spawn_tick, static_cast<uint8_t>(did_hit ? 1 : 0), 0, 30 };
+        pong::resolve_schrodinger(g_app.sim, hit_type, 0);
+        g_app.auth_resend = { true, g_app.sim.schro_spawn_tick, hit_type, 0, 30 };
     }
 
     if (g_app.sim.score_a >= pong::WIN_SCORE) { g_app.game_over = true; g_app.winner = 1; }
@@ -187,7 +177,7 @@ void game_tick() {
 
     if (g_app.auth_resend.active && g_app.auth_resend.frames_left > 0) {
         uint8_t auth_buf[pong::AUTH_COLLISION_BYTES];
-        int alen = pong::encode_auth_collision(auth_buf, g_app.auth_resend.spawn_tick, g_app.auth_resend.did_hit, g_app.auth_resend.side);
+        int alen = pong::encode_auth_collision(auth_buf, g_app.auth_resend.spawn_tick, g_app.auth_resend.hit_type, g_app.auth_resend.side);
         g_app.transport->send({ auth_buf, static_cast<size_t>(alen) });
         g_app.auth_resend.frames_left--;
     } else {

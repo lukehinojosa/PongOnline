@@ -10,6 +10,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -107,6 +108,7 @@ struct Lobby {
 static std::mutex g_mutex;
 static std::unordered_map<std::string, Lobby> g_lobbies;
 static std::unordered_map<rtc::WebSocket*, std::shared_ptr<rtc::WebSocket>> g_relay;
+static std::unordered_set<std::shared_ptr<rtc::WebSocket>> g_pending;
 
 // Helpers
 
@@ -123,36 +125,42 @@ static std::string make_code() {
 // Per-client handler
 
 static void handle_client(std::shared_ptr<rtc::WebSocket> ws) {
-    ws->onMessage([ws](rtc::message_variant data) {
-        // Relay mode; forward directly to partner (text or binary)
+    // Keep the socket alive explicitly
+    {
+        std::lock_guard lk(g_mutex);
+        g_pending.insert(ws);
+    }
+
+    // Create a weak_ptr for the lambdas to capture safely
+    std::weak_ptr<rtc::WebSocket> weak_ws = ws;
+
+    ws->onMessage([weak_ws](rtc::message_variant data) {
+        // Lock the weak_ptr to ensure the socket is still alive
+        auto ws = weak_ws.lock();
+        if (!ws) return;
+
         {
             std::lock_guard lk(g_mutex);
             auto it = g_relay.find(ws.get());
             if (it != g_relay.end()) {
                 if (std::holds_alternative<std::string>(data)) {
-                    const auto& s = std::get<std::string>(data);
-                    it->second->send(s);
+                    it->second->send(std::get<std::string>(data));
                 } else {
-                    const auto& b = std::get<rtc::binary>(data);
-                    // Silently forward binary data.
-                    // At 60Hz per client, logging here would flood the console.
-                    it->second->send(b);
+                    it->second->send(std::get<rtc::binary>(data));
                 }
                 return;
             }
         }
 
-        // Signaling mode; text only
         if (!std::holds_alternative<std::string>(data))
             return;
-        const std::string& raw = std::get<std::string>(data);
 
+        const std::string& raw = std::get<std::string>(data);
         nlohmann::json msg;
         try { msg = nlohmann::json::parse(raw); }
         catch (...) { return; }
 
         const std::string type = msg.value("type", "");
-        std::cout << "[signaling] rx '" << type << "' from " << ws.get() << "\n";
 
         if (type == "host") {
             std::string code;
@@ -160,11 +168,11 @@ static void handle_client(std::shared_ptr<rtc::WebSocket> ws) {
                 std::lock_guard lk(g_mutex);
                 do { code = make_code(); } while (g_lobbies.count(code));
                 g_lobbies[code].host_ws = ws;
+                g_pending.erase(ws); // Remove from pending, now owned by g_lobbies
             }
             ws->send(nlohmann::json{ {"type","code"}, {"code", code} }.dump());
-            std::cout << "[signaling] new lobby: " << code << "\n";
-
-        } else if (type == "join") {
+        }
+        else if (type == "join") {
             const std::string code = msg.value("code", "");
             std::shared_ptr<rtc::WebSocket> host_ws;
             {
@@ -173,40 +181,41 @@ static void handle_client(std::shared_ptr<rtc::WebSocket> ws) {
                 if (it == g_lobbies.end()) {
                     ws->send(nlohmann::json{{"type","error"},{"msg","bad code"}}.dump());
                     ws->close();
-                    std::cout << "[signaling] bad code: " << code << "\n";
                     return;
                 }
                 host_ws = it->second.host_ws;
-                // Pair the two sockets in the relay map
                 g_relay[host_ws.get()] = ws;
                 g_relay[ws.get()]      = host_ws;
+                g_pending.erase(ws); // Remove from pending, now owned by g_relay
             }
-            // Notify both sides the relay is live
             host_ws->send(nlohmann::json{{"type","guest_ready"}}.dump());
             ws->send(nlohmann::json{{"type","ready"}}.dump());
-            std::cout << "[signaling] guest joined lobby: " << code
-                      << " host=" << host_ws.get()
-                      << " guest=" << ws.get() << "\n";
         }
-        // Any other type before relay is set up: ignore.
     });
 
-    ws->onClosed([ws]() {
+    ws->onClosed([weak_ws]() {
+        auto ws = weak_ws.lock();
+        if (!ws) return;
+
         std::lock_guard lk(g_mutex);
-        // Remove from lobbies
+
+        // Cleanup pending
+        g_pending.erase(ws);
+
+        // Cleanup lobbies
         for (auto it = g_lobbies.begin(); it != g_lobbies.end(); ) {
             if (it->second.host_ws == ws)
                 it = g_lobbies.erase(it);
             else
                 ++it;
         }
-        // Remove from relay map (both directions)
+
+        // Cleanup relays
         auto it = g_relay.find(ws.get());
         if (it != g_relay.end()) {
-            g_relay.erase(it->second.get()); // remove partner's entry too
+            g_relay.erase(it->second.get());
             g_relay.erase(it);
         }
-        std::cout << "[signaling] client disconnected: " << ws.get() << "\n";
     });
 }
 

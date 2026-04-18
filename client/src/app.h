@@ -23,7 +23,9 @@ struct RenderState {
 
     // Speculative State
     bool is_split = false;
-    float ghost_ball_x = 0.f, ghost_ball_y = 0.f;
+    float ghost_x[4] = {0.f};
+    float ghost_y[4] = {0.f};
+    uint8_t opt_hit_type = 0;
     bool is_waiting_auth_bounce = false;
 };
 
@@ -74,7 +76,7 @@ struct App {
     struct AuthResend {
         bool active = false;
         uint32_t spawn_tick = 0;
-        uint8_t did_hit = 0;
+        uint8_t hit_type = 0;
         uint8_t side = 0;
         int frames_left = 0;
     } auth_resend;

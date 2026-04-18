@@ -73,10 +73,10 @@ inline QuantState sim_quantize(const SimState& s) {
     q.score_b = s.score_b;
     q.tick = s.tick;
     q.has_schrodinger = s.has_schrodinger;
-    q.s_ball_x = s.s_ball_x / 100;
-    q.s_ball_y = s.s_ball_y / 100;
-    q.s_ball_vx = s.s_ball_vx / 100;
-    q.s_ball_vy = s.s_ball_vy / 100;
+    q.s_ball_x = s.s_x[0] / 100;
+    q.s_ball_y = s.s_y[0] / 100;
+    q.s_ball_vx = s.s_vx[0] / 100;
+    q.s_ball_vy = s.s_vy[0] / 100;
     q.schro_spawn_y = s.schro_spawn_y / 100;
     q.schro_spawn_tick = s.schro_spawn_tick;
     return q;
@@ -211,10 +211,10 @@ inline bool decode_game_state(std::span<const uint8_t> buf, SimState& sim, Quant
     sim.score_a = q.score_a;
     sim.score_b = q.score_b;
     sim.has_schrodinger  = q.has_schrodinger;
-    sim.s_ball_x         = q.s_ball_x * 100;
-    sim.s_ball_y         = q.s_ball_y * 100;
-    sim.s_ball_vx        = q.s_ball_vx * 100;
-    sim.s_ball_vy        = q.s_ball_vy * 100;
+    sim.s_x[0]           = q.s_ball_x * 100;
+    sim.s_y[0]           = q.s_ball_y * 100;
+    sim.s_vx[0]          = q.s_ball_vx * 100;
+    sim.s_vy[0]          = q.s_ball_vy * 100;
     sim.schro_spawn_y    = q.schro_spawn_y * 100;
     sim.schro_spawn_tick = q.schro_spawn_tick;
     return true;
@@ -355,25 +355,24 @@ inline bool decode_username(std::span<const uint8_t> buf, std::string& out) {
 //   side: 0 = Host paddle resolved, 1 = Guest paddle resolved
 static constexpr int AUTH_COLLISION_BYTES = 7; // == sizeof(AuthCollisionMsg)
 
-inline int encode_auth_collision(uint8_t* buf, uint32_t tick, uint8_t did_hit, uint8_t side) {
+inline int encode_auth_collision(uint8_t* buf, uint32_t tick, uint8_t hit_type, uint8_t side) {
     AuthCollisionMsg m;
-    m.tick    = tick;
-    m.did_hit = did_hit;
-    m.side    = side;
+    m.tick = tick;
+    m.hit_type = hit_type;
+    m.side = side;
     std::memcpy(buf, &m, sizeof(m));
     return sizeof(m);
 }
 
 inline bool decode_auth_collision(std::span<const uint8_t> buf,
-                                  uint32_t& tick, uint8_t& did_hit, uint8_t& side) {
-    if (buf.size() < sizeof(AuthCollisionMsg) ||
-        buf[0] != static_cast<uint8_t>(MsgType::AuthCollision))
+                                  uint32_t& tick, uint8_t& hit_type, uint8_t& side) {
+    if (buf.size() < sizeof(AuthCollisionMsg) || buf[0] != static_cast<uint8_t>(MsgType::AuthCollision))
         return false;
     AuthCollisionMsg m;
     std::memcpy(&m, buf.data(), sizeof(m));
-    tick    = m.tick;
-    did_hit = m.did_hit;
-    side    = m.side;
+    tick = m.tick;
+    hit_type = m.hit_type;
+    side = m.side;
     return true;
 }
 
