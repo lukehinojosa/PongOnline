@@ -35,6 +35,8 @@ void reset_app() {
     g_app.target_remote_paddle_y = start_y;
     g_app.last_remote_paddle_ms = 0.0;
     g_app.remote_ever_sent_paddle = false;
+    g_app.render_ball_x = static_cast<float>(pong::FIELD_W / 2) / 100.f;
+    g_app.render_ball_y = static_cast<float>(pong::FIELD_H / 2) / 100.f;
 
     // username_edit and signaling_edit are intentionally not reset
     g_app.username_edit.focused = false;

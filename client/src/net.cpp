@@ -32,6 +32,8 @@ void start_as_host() {
         g_app.game_over = false;
         g_app.winner = 0;
         g_app.local_tick = 0;
+        g_app.accumulator_ms = 0.0;
+        g_app.last_frame_ms = now_ms();
 
         TraceLog(LOG_INFO, "[host] guest connected");
         send_username();
@@ -93,6 +95,7 @@ void start_as_guest(const std::string& code) {
         g_app.game_over = false;
         g_app.winner = 0;
         g_app.accumulator_ms = 0.0;
+        g_app.last_frame_ms = now_ms();
         g_app.remote_ever_sent_paddle = false;
 
         TraceLog(LOG_INFO, "[guest] connected to host");
@@ -105,6 +108,15 @@ void start_as_guest(const std::string& code) {
         if (type == pong::MsgType::PaddleState) {
             pong::DecodedPaddleState ps;
             if (pong::decode_paddle_state(buf, ps)) {
+                if (!g_app.remote_ever_sent_paddle) {
+                    // Calculate how many ticks it took for this packet to reach
+                    uint32_t one_way_ticks = static_cast<uint32_t>((g_app.rtt_ms / 2.0f) / (1000.0 / 60.0));
+
+                    // Start the simulation ahead of the packet tick to account for that delay
+                    g_app.sim.tick = ps.tick + one_way_ticks;
+                    g_app.latest_remote_tick = ps.tick;
+                    g_app.accumulator_ms = 0.0;
+                }
                 // Detect host resetting the game via a significant tick drop
                 if (g_app.game_over && ps.tick < g_app.latest_remote_tick - 10) {
                     g_app.game_over = false;
@@ -127,7 +139,14 @@ void start_as_guest(const std::string& code) {
             if (pong::decode_pong(buf, seq, client_ts, server_ts) && seq == g_app.ping_seq - 1) {
                 uint32_t now32 = static_cast<uint32_t>(static_cast<uint64_t>(now_ms()) & 0xFFFFFFFF);
                 double rtt = static_cast<double>((now32 - client_ts) & 0xFFFFFFFF);
-                g_app.rtt_ms = RTT_EWMA_ALPHA * static_cast<float>(rtt) + (1.f - RTT_EWMA_ALPHA) * g_app.rtt_ms;
+
+                // Snap to raw RTT on the first ping; smooth subsequent ones
+                if (g_app.time_offset_ms == 0.0) {
+                    g_app.rtt_ms = static_cast<float>(rtt);
+                } else {
+                    g_app.rtt_ms = RTT_EWMA_ALPHA * static_cast<float>(rtt) + (1.f - RTT_EWMA_ALPHA) * g_app.rtt_ms;
+                }
+
                 double one_way = rtt / 2.0;
                 double estimated_server_now = static_cast<double>(server_ts) + one_way;
                 double raw_offset = estimated_server_now - static_cast<double>(now32);

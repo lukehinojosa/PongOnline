@@ -118,8 +118,13 @@ static void main_loop() {
             // PLL tick-pacing (guest only)
             if (g_app.role == pong::Role::Guest && g_app.remote_ever_sent_paddle) {
 
+                // Extrapolate where the host is right now based on latency and time since last packet
+                uint32_t one_way_ticks = static_cast<uint32_t>((g_app.rtt_ms / 2.0f) / TICK_MS);
+                uint32_t elapsed_ticks = static_cast<uint32_t>(std::max(0.0, now - g_app.last_remote_paddle_ms) / TICK_MS);
+                uint32_t target_tick = g_app.latest_remote_tick + one_way_ticks + elapsed_ticks;
+
                 // The Hard Deficit
-                int hard_deficit = static_cast<int>(g_app.latest_remote_tick) - static_cast<int>(g_app.sim.tick);
+                int hard_deficit = static_cast<int>(target_tick) - static_cast<int>(g_app.sim.tick);
 
                 // Only snap if fallen significantly behind
                 if (hard_deficit > 4) {
@@ -132,14 +137,14 @@ static void main_loop() {
                 }
 
                 // The Soft Deficit
-                uint32_t one_way_ticks = static_cast<uint32_t>((g_app.rtt_ms / 2.0f) / TICK_MS);
-                uint32_t target_tick = g_app.latest_remote_tick + one_way_ticks;
                 int tick_diff = static_cast<int>(target_tick) - static_cast<int>(g_app.sim.tick);
 
-                // Use the drift multiplier to gently catch up.
-                if (tick_diff > 1) g_app.clock_drift_multiplier = 1.1f;
-                else if (tick_diff < -1) g_app.clock_drift_multiplier = 0.9f;
-                else g_app.clock_drift_multiplier = 1.0f;
+                if (tick_diff > 0)
+                    g_app.clock_drift_multiplier = 1.01f; // Gently speed up
+                else if (tick_diff < 0)
+                    g_app.clock_drift_multiplier = 0.99f; // Gently slow down
+                else
+                    g_app.clock_drift_multiplier = 1.0f;
 
                 if (now - g_app.last_ping_sent_ms >= PING_INTERVAL_MS) {
                     g_app.last_ping_sent_ms = now;

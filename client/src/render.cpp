@@ -12,8 +12,22 @@ RenderState compute_render_state() {
     RenderState rs;
     rs.score_a = g_app.sim.score_a;
     rs.score_b = g_app.sim.score_b;
-    rs.ball_x = (float)g_app.sim.ball_x / 100.f;
-    rs.ball_y = (float)g_app.sim.ball_y / 100.f;
+
+    float target_ball_x = (float)g_app.sim.ball_x / 100.f;
+    float target_ball_y = (float)g_app.sim.ball_y / 100.f;
+
+    // Distance check: If the ball teleports (e.g., goal reset), snap it immediately
+    if (std::abs(target_ball_x - g_app.render_ball_x) > 50.f) {
+        g_app.render_ball_x = target_ball_x;
+        g_app.render_ball_y = target_ball_y;
+    } else {
+        // Otherwise, smoothly lerp to hide the PLL tick jitter
+        g_app.render_ball_x += (target_ball_x - g_app.render_ball_x) * 0.4f;
+        g_app.render_ball_y += (target_ball_y - g_app.render_ball_y) * 0.4f;
+    }
+
+    rs.ball_x = g_app.render_ball_x;
+    rs.ball_y = g_app.render_ball_y;
 
     // Lerp the remote paddle towards the latest absolute target
     g_app.render_remote_paddle_y += (g_app.target_remote_paddle_y - g_app.render_remote_paddle_y) * 0.4f;

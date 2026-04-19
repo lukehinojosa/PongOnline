@@ -235,7 +235,7 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
             s.ball_y = FIELD_H / 2;
             s.ball_vx = 0;
             s.ball_vy = 0;
-            s.serve_tick = s.schro_spawn_tick + 60;
+            s.serve_tick = s.tick + 60;
         }
         if (s.ball_x > FIELD_W) {
             s.score_a++;
@@ -243,7 +243,7 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
             s.ball_y = FIELD_H / 2;
             s.ball_vx = 0;
             s.ball_vy = 0;
-            s.serve_tick = s.schro_spawn_tick + 60;
+            s.serve_tick = s.tick + 60;
         }
     }
 
