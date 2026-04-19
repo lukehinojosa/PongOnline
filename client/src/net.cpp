@@ -26,6 +26,13 @@ void start_as_host() {
     };
     g_app.transport->on_open = []() {
         g_app.peer_connected = true;
+
+        // Reset state so new guests don't inherit a massive tick deficit
+        g_app.sim = pong::SimState{};
+        g_app.game_over = false;
+        g_app.winner = 0;
+        g_app.local_tick = 0;
+
         TraceLog(LOG_INFO, "[host] guest connected");
         send_username();
     };
@@ -53,9 +60,11 @@ void start_as_host() {
             uint32_t tick;
             uint8_t hit_type, side;
             if (pong::decode_auth_collision(buf, tick, hit_type, side)) {
-                if (g_app.sim.has_schrodinger && tick == g_app.sim.schro_spawn_tick) {
+            // Match by side, not by exact tick, for minor desyncs
+                if (g_app.sim.has_schrodinger && g_app.sim.schro_side == side) {
                     pong::resolve_schrodinger(g_app.sim, hit_type, side);
                 } else if (tick >= g_app.sim.tick) {
+                    // Arrived before the ball reached the paddle locally
                     g_app.sim.has_pending_auth = true;
                     g_app.sim.pending_auth_tick = tick;
                     g_app.sim.pending_auth_hit_type = hit_type;
@@ -76,6 +85,16 @@ void start_as_guest(const std::string& code) {
     g_app.transport = pong::make_transport();
     g_app.transport->on_open = []() {
         g_app.peer_connected = true;
+
+        // Clean state upon joining
+        g_app.sim = pong::SimState{};
+        g_app.latest_remote_tick = 0;
+        g_app.local_tick = 0;
+        g_app.game_over = false;
+        g_app.winner = 0;
+        g_app.accumulator_ms = 0.0;
+        g_app.remote_ever_sent_paddle = false;
+
         TraceLog(LOG_INFO, "[guest] connected to host");
         send_username();
     };
@@ -86,8 +105,8 @@ void start_as_guest(const std::string& code) {
         if (type == pong::MsgType::PaddleState) {
             pong::DecodedPaddleState ps;
             if (pong::decode_paddle_state(buf, ps)) {
-                // Detect host resetting the game via tick drop
-                if (g_app.game_over && ps.tick < g_app.sim.tick) {
+                // Detect host resetting the game via a significant tick drop
+                if (g_app.game_over && ps.tick < g_app.latest_remote_tick - 10) {
                     g_app.game_over = false;
                     g_app.winner = 0;
                     g_app.local_tick = 0;
@@ -118,9 +137,11 @@ void start_as_guest(const std::string& code) {
             uint32_t tick;
             uint8_t hit_type, side;
             if (pong::decode_auth_collision(buf, tick, hit_type, side)) {
-                if (g_app.sim.has_schrodinger && tick == g_app.sim.schro_spawn_tick) {
+                // Match by side, not by exact tick, for minor desyncs
+                if (g_app.sim.has_schrodinger && g_app.sim.schro_side == side) {
                     pong::resolve_schrodinger(g_app.sim, hit_type, side);
-                } else if (tick >= g_app.sim.tick) {
+                } else if (tick >= g_app.sim.tick) {} else if (tick >= g_app.sim.tick) {
+                    // Arrived before the ball reached the paddle locally
                     g_app.sim.has_pending_auth = true;
                     g_app.sim.pending_auth_tick = tick;
                     g_app.sim.pending_auth_hit_type = hit_type;

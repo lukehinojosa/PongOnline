@@ -26,6 +26,7 @@ void reset_app() {
     g_app.clock_drift_multiplier = 1.0f;
 
     g_app.local_tick = 0;
+    g_app.latest_remote_tick = 0;
     g_app.accumulator_ms = 0.0;
     g_app.last_frame_ms = 0.0;
 

@@ -172,11 +172,11 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
             s.s_vx[3] = BALL_SPEED_DIAG; s.s_vy[3] = BALL_SPEED_DIAG;  // Down
 
             // Optimistically lock the main ball to the locally predicted timeline
-            s.opt_hit_type = get_hit_type(s.schro_spawn_y, s.paddle_a_y);
+            s.opt_hit_type = 2;
             s.ball_x = s.s_x[s.opt_hit_type];   s.ball_y = s.s_y[s.opt_hit_type];
             s.ball_vx = s.s_vx[s.opt_hit_type]; s.ball_vy = s.s_vy[s.opt_hit_type];
 
-            if (s.has_pending_auth && s.pending_auth_tick == s.tick) {
+            if (s.has_pending_auth && s.pending_auth_side == s.schro_side) {
                 resolve_schrodinger(s, s.pending_auth_hit_type, s.pending_auth_side);
                 s.has_pending_auth = false;
             }
@@ -206,29 +206,11 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
             s.ball_x = s.s_x[s.opt_hit_type];   s.ball_y = s.s_y[s.opt_hit_type];
             s.ball_vx = s.s_vx[s.opt_hit_type]; s.ball_vy = s.s_vy[s.opt_hit_type];
 
-            if (s.has_pending_auth && s.pending_auth_tick == s.tick) {
+            if (s.has_pending_auth && s.pending_auth_side == s.schro_side) {
                 resolve_schrodinger(s, s.pending_auth_hit_type, s.pending_auth_side);
                 s.has_pending_auth = false;
             }
         }
-    }
-
-    // Safety exits act as goal triggers
-    if (s.ball_x < 0) {
-        s.score_b++;
-        s.ball_x  = FIELD_W / 2;
-        s.ball_y  = FIELD_H / 2;
-        s.ball_vx = 0;
-        s.ball_vy = 0;
-        s.serve_tick = s.schro_spawn_tick + 60;
-    }
-    if (s.ball_x > FIELD_W) {
-        s.score_a++;
-        s.ball_x  = FIELD_W / 2;
-        s.ball_y  = FIELD_H / 2;
-        s.ball_vx = 0;
-        s.ball_vy = 0;
-        s.serve_tick = s.schro_spawn_tick + 60;
     }
 
     // --- Schrödinger ball physics (scoring timeline) ---
@@ -241,6 +223,27 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
             if (s.s_y[i] >= FIELD_H - BALL_SIZE) { s.s_y[i] = FIELD_H - BALL_SIZE; s.s_vy[i] = -s.s_vy[i]; }
             if (s.s_x[i] < -BALL_SIZE) { s.s_x[i] = -BALL_SIZE - 1; s.s_vx[i] = 0; s.s_vy[i] = 0; }
             if (s.s_x[i] > FIELD_W) { s.s_x[i] = FIELD_W + 1; s.s_vx[i] = 0; s.s_vy[i] = 0; }
+        }
+    }
+
+    // Wrap the safety exits so goals cannot be scored while the timeline is disputed
+    if (!s.has_schrodinger) {
+        // Safety exits act as goal triggers
+        if (s.ball_x < 0) {
+            s.score_b++;
+            s.ball_x = FIELD_W / 2;
+            s.ball_y = FIELD_H / 2;
+            s.ball_vx = 0;
+            s.ball_vy = 0;
+            s.serve_tick = s.schro_spawn_tick + 60;
+        }
+        if (s.ball_x > FIELD_W) {
+            s.score_a++;
+            s.ball_x = FIELD_W / 2;
+            s.ball_y = FIELD_H / 2;
+            s.ball_vx = 0;
+            s.ball_vy = 0;
+            s.serve_tick = s.schro_spawn_tick + 60;
         }
     }
 
