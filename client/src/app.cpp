@@ -22,6 +22,7 @@ void reset_app() {
     g_app.ping_seq = 0;
     g_app.last_ping_sent_ms = -1000.0;
     g_app.rtt_ms = 60.f;
+    g_app.rtt_valid = false;
     g_app.time_offset_ms = 0.0;
     g_app.clock_drift_multiplier = 1.0f;
 

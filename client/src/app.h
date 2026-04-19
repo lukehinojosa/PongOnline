@@ -54,6 +54,7 @@ struct App {
     uint32_t ping_seq = 0;
     double last_ping_sent_ms = -1000.0;
     float rtt_ms = 60.f;
+    bool rtt_valid = false;
 
     // PLL clock synchronisation (guest only)
     double time_offset_ms = 0.0;

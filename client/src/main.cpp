@@ -115,13 +115,25 @@ static void main_loop() {
 
             int current_max_ticks = MAX_TICKS_FRAME;
 
-            // PLL tick-pacing (guest only)
-            if (g_app.role == pong::Role::Guest && g_app.remote_ever_sent_paddle) {
+            // Guest continuous pinging; runs even if waiting for sync
+            if (g_app.role == pong::Role::Guest) {
+                if (now - g_app.last_ping_sent_ms >= PING_INTERVAL_MS) {
+                    g_app.last_ping_sent_ms = now;
+                    uint32_t ts32 = static_cast<uint32_t>(static_cast<uint64_t>(now) & 0xFFFFFFFF);
+                    uint8_t pbuf[pong::PING_BYTES];
+                    g_app.transport->send({ pbuf, static_cast<size_t>(pong::encode_ping(pbuf, g_app.ping_seq++, ts32)) });
+                }
+            }
 
-                // Extrapolate where the host is right now based on latency and time since last packet
-                uint32_t one_way_ticks = static_cast<uint32_t>((g_app.rtt_ms / 2.0f) / TICK_MS);
-                uint32_t elapsed_ticks = static_cast<uint32_t>(std::max(0.0, now - g_app.last_remote_paddle_ms) / TICK_MS);
-                uint32_t target_tick = g_app.latest_remote_tick + one_way_ticks + elapsed_ticks;
+            // PLL tick-pacing (guest only, strictly gated by rtt_valid)
+            if (g_app.role == pong::Role::Guest && g_app.remote_ever_sent_paddle && g_app.rtt_valid) {
+
+                // Math in milliseconds first, then convert to ticks at the very end
+                double one_way_ms = g_app.rtt_ms / 2.0;
+                double elapsed_ms = std::max(0.0, now - g_app.last_remote_paddle_ms);
+
+                double total_target_ms = (g_app.latest_remote_tick * TICK_MS) + one_way_ms + elapsed_ms;
+                uint32_t target_tick = static_cast<uint32_t>(total_target_ms / TICK_MS);
 
                 // The Hard Deficit
                 int hard_deficit = static_cast<int>(target_tick) - static_cast<int>(g_app.sim.tick);
@@ -145,65 +157,67 @@ static void main_loop() {
                     g_app.clock_drift_multiplier = 0.99f; // Gently slow down
                 else
                     g_app.clock_drift_multiplier = 1.0f;
-
-                if (now - g_app.last_ping_sent_ms >= PING_INTERVAL_MS) {
-                    g_app.last_ping_sent_ms = now;
-                    uint32_t ts32 = static_cast<uint32_t>(static_cast<uint64_t>(now) & 0xFFFFFFFF);
-                    uint8_t pbuf[pong::PING_BYTES];
-                    g_app.transport->send({ pbuf, static_cast<size_t>(pong::encode_ping(pbuf, g_app.ping_seq++, ts32)) });
-                }
             }
 
             g_app.accumulator_ms += delta * g_app.clock_drift_multiplier;
             int ticks_run = 0;
 
-            while (g_app.accumulator_ms >= TICK_MS && ticks_run < current_max_ticks) {
-                if (g_app.role == pong::Role::Host) {
-                    game_tick();
-                } else {
-                    bool had_schro = g_app.sim.has_schrodinger;
-                    pong::sim_tick(g_app.sim, 0, guest_dir); // host paddle managed by PaddleState
+            // Gate the simulation based on valid RTT
+            bool can_simulate = (g_app.role == pong::Role::Host) ||
+                                (g_app.role == pong::Role::Guest && g_app.rtt_valid);
 
-                    // Guest hit detection trigger
-                    if (!had_schro && g_app.sim.has_schrodinger && g_app.sim.schro_side == 1) {
-                        uint8_t hit_type = pong::get_hit_type(g_app.sim.schro_spawn_y, g_app.sim.paddle_b_y);
-                        uint8_t auth_buf[pong::AUTH_COLLISION_BYTES];
-                        int alen = pong::encode_auth_collision(auth_buf, g_app.sim.schro_spawn_tick, hit_type, 1);
-                        g_app.transport->send({ auth_buf, static_cast<size_t>(alen) });
-
-                        pong::resolve_schrodinger(g_app.sim, hit_type, 1);
-                        g_app.auth_resend = { true, g_app.sim.schro_spawn_tick, hit_type, 1, 30 };
-                    }
-
-                    if (g_app.sim.score_a >= pong::WIN_SCORE) {
-                        g_app.game_over = true;
-                        g_app.winner = 1;
-                        break;
-                    }
-                    else if (g_app.sim.score_b >= pong::WIN_SCORE) {
-                        g_app.game_over = true;
-                        g_app.winner = 2;
-                        break;
-                    }
-
-                    uint8_t pbuf[pong::PADDLE_STATE_MAX_BYTES];
-                    int plen = pong::encode_paddle_state(pbuf, g_app.sim.tick, g_app.sim.paddle_b_y);
-                    g_app.transport->send({ pbuf, static_cast<size_t>(plen) });
-
-                    // Broadcast the collision event repeatedly
-                    if (g_app.auth_resend.active && g_app.auth_resend.frames_left > 0) {
-                        uint8_t auth_buf[pong::AUTH_COLLISION_BYTES];
-                        int alen = pong::encode_auth_collision(auth_buf, g_app.auth_resend.spawn_tick, g_app.auth_resend.hit_type, g_app.auth_resend.side);
-                        g_app.transport->send({ auth_buf, static_cast<size_t>(alen) });
-                        g_app.auth_resend.frames_left--;
+            if (can_simulate) {
+                while (g_app.accumulator_ms >= TICK_MS && ticks_run < current_max_ticks) {
+                    if (g_app.role == pong::Role::Host) {
+                        game_tick();
                     } else {
-                        g_app.auth_resend.active = false;
-                    }
+                        bool had_schro = g_app.sim.has_schrodinger;
+                        pong::sim_tick(g_app.sim, 0, guest_dir); // host paddle managed by PaddleState
 
-                    ++g_app.local_tick;
+                        // Guest hit detection trigger
+                        if (!had_schro && g_app.sim.has_schrodinger && g_app.sim.schro_side == 1) {
+                            uint8_t hit_type = pong::get_hit_type(g_app.sim.schro_spawn_y, g_app.sim.paddle_b_y);
+                            uint8_t auth_buf[pong::AUTH_COLLISION_BYTES];
+                            int alen = pong::encode_auth_collision(auth_buf, g_app.sim.schro_spawn_tick, hit_type, 1);
+                            g_app.transport->send({ auth_buf, static_cast<size_t>(alen) });
+
+                            pong::resolve_schrodinger(g_app.sim, hit_type, 1);
+                            g_app.auth_resend = { true, g_app.sim.schro_spawn_tick, hit_type, 1, 30 };
+                        }
+
+                        if (g_app.sim.score_a >= pong::WIN_SCORE) {
+                            g_app.game_over = true;
+                            g_app.winner = 1;
+                            break;
+                        }
+                        else if (g_app.sim.score_b >= pong::WIN_SCORE) {
+                            g_app.game_over = true;
+                            g_app.winner = 2;
+                            break;
+                        }
+
+                        uint8_t pbuf[pong::PADDLE_STATE_MAX_BYTES];
+                        int plen = pong::encode_paddle_state(pbuf, g_app.sim.tick, g_app.sim.paddle_b_y);
+                        g_app.transport->send({ pbuf, static_cast<size_t>(plen) });
+
+                        // Broadcast the collision event repeatedly
+                        if (g_app.auth_resend.active && g_app.auth_resend.frames_left > 0) {
+                            uint8_t auth_buf[pong::AUTH_COLLISION_BYTES];
+                            int alen = pong::encode_auth_collision(auth_buf, g_app.auth_resend.spawn_tick, g_app.auth_resend.hit_type, g_app.auth_resend.side);
+                            g_app.transport->send({ auth_buf, static_cast<size_t>(alen) });
+                            g_app.auth_resend.frames_left--;
+                        } else {
+                            g_app.auth_resend.active = false;
+                        }
+
+                        ++g_app.local_tick;
+                    }
+                    g_app.accumulator_ms -= TICK_MS;
+                    ++ticks_run;
                 }
-                g_app.accumulator_ms -= TICK_MS;
-                ++ticks_run;
+            } else {
+                // Throw away accumulated time while waiting for sync
+                g_app.accumulator_ms = 0.0;
             }
         }
     }

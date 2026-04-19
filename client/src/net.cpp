@@ -88,6 +88,13 @@ void start_as_guest(const std::string& code) {
     g_app.transport->on_open = []() {
         g_app.peer_connected = true;
 
+        // Force an immediate Ping to establish true RTT before starting
+        pong::PingMsg ping;
+        ping.seq = ++g_app.ping_seq;
+        ping.client_ts = static_cast<uint32_t>(GetTime() * 1000.0);
+        g_app.last_ping_sent_ms = GetTime() * 1000.0;
+        g_app.transport->send_msg(ping);
+
         // Clean state upon joining
         g_app.sim = pong::SimState{};
         g_app.latest_remote_tick = 0;
@@ -101,21 +108,30 @@ void start_as_guest(const std::string& code) {
         TraceLog(LOG_INFO, "[guest] connected to host");
         send_username();
     };
+
     g_app.transport->on_message = [](std::span<const uint8_t> buf) {
         if (buf.empty()) return;
         auto type = pong::peek_type(buf);
 
         if (type == pong::MsgType::PaddleState) {
+
+            // Ignore host game state until RTT is valid
+            if (!g_app.rtt_valid)
+                return;
+
             pong::DecodedPaddleState ps;
             if (pong::decode_paddle_state(buf, ps)) {
                 if (!g_app.remote_ever_sent_paddle) {
-                    // Calculate how many ticks it took for this packet to reach
-                    uint32_t one_way_ticks = static_cast<uint32_t>((g_app.rtt_ms / 2.0f) / (1000.0 / 60.0));
+                    // Calculate sub-tick remainder
+                    double one_way_ms = g_app.rtt_ms / 2.0;
+                    uint32_t one_way_ticks = static_cast<uint32_t>(one_way_ms / (1000.0 / 60.0));
+                    double remainder_ms = one_way_ms - (one_way_ticks * (1000.0 / 60.0));
 
-                    // Start the simulation ahead of the packet tick to account for that delay
                     g_app.sim.tick = ps.tick + one_way_ticks;
                     g_app.latest_remote_tick = ps.tick;
-                    g_app.accumulator_ms = 0.0;
+
+                    // Preserve the fractional millisecond offset
+                    g_app.accumulator_ms = remainder_ms;
                 }
                 // Detect host resetting the game via a significant tick drop
                 if (g_app.game_over && ps.tick < g_app.latest_remote_tick - 10) {
@@ -136,21 +152,28 @@ void start_as_guest(const std::string& code) {
             }
         } else if (type == pong::MsgType::Pong) {
             uint32_t seq, client_ts, server_ts;
-            if (pong::decode_pong(buf, seq, client_ts, server_ts) && seq == g_app.ping_seq - 1) {
+
+            if (pong::decode_pong(buf, seq, client_ts, server_ts)) {
                 uint32_t now32 = static_cast<uint32_t>(static_cast<uint64_t>(now_ms()) & 0xFFFFFFFF);
-                double rtt = static_cast<double>((now32 - client_ts) & 0xFFFFFFFF);
 
-                // Snap to raw RTT on the first ping; smooth subsequent ones
-                if (g_app.time_offset_ms == 0.0) {
-                    g_app.rtt_ms = static_cast<float>(rtt);
-                } else {
-                    g_app.rtt_ms = RTT_EWMA_ALPHA * static_cast<float>(rtt) + (1.f - RTT_EWMA_ALPHA) * g_app.rtt_ms;
+                // Prevent processing ancient wrapped packets
+                int32_t rtt_diff = static_cast<int32_t>(now32 - client_ts);
+                if (rtt_diff >= 0 && rtt_diff < 10000) {
+                    double rtt = static_cast<double>(rtt_diff);
+
+                    g_app.rtt_valid = true;
+
+                    if (g_app.time_offset_ms == 0.0) {
+                        g_app.rtt_ms = static_cast<float>(rtt);
+                    } else {
+                        g_app.rtt_ms = RTT_EWMA_ALPHA * static_cast<float>(rtt) + (1.f - RTT_EWMA_ALPHA) * g_app.rtt_ms;
+                    }
+
+                    double one_way = rtt / 2.0;
+                    double estimated_server_now = static_cast<double>(server_ts) + one_way;
+                    double raw_offset = estimated_server_now - static_cast<double>(now32);
+                    g_app.time_offset_ms = (g_app.time_offset_ms == 0.0) ? raw_offset : (0.8 * g_app.time_offset_ms + 0.2 * raw_offset);
                 }
-
-                double one_way = rtt / 2.0;
-                double estimated_server_now = static_cast<double>(server_ts) + one_way;
-                double raw_offset = estimated_server_now - static_cast<double>(now32);
-                g_app.time_offset_ms = (g_app.time_offset_ms == 0.0) ? raw_offset : (0.8 * g_app.time_offset_ms + 0.2 * raw_offset);
             }
         } else if (type == pong::MsgType::AuthCollision) {
             uint32_t tick;
@@ -159,7 +182,7 @@ void start_as_guest(const std::string& code) {
                 // Match by side, not by exact tick, for minor desyncs
                 if (g_app.sim.has_schrodinger && g_app.sim.schro_side == side) {
                     pong::resolve_schrodinger(g_app.sim, hit_type, side);
-                } else if (tick >= g_app.sim.tick) {} else if (tick >= g_app.sim.tick) {
+                } else if (tick >= g_app.sim.tick) {
                     // Arrived before the ball reached the paddle locally
                     g_app.sim.has_pending_auth = true;
                     g_app.sim.pending_auth_tick = tick;
@@ -172,6 +195,7 @@ void start_as_guest(const std::string& code) {
             if (pong::decode_username(buf, name)) g_app.opponent_username = name;
         }
     };
+
     g_app.transport->on_close = []() {
         if (!g_app.peer_connected) {
             g_app.connecting = false;
@@ -182,6 +206,7 @@ void start_as_guest(const std::string& code) {
         }
         g_app.peer_connected = false;
     };
+
     g_app.transport->join(g_app.signaling_edit.text, code);
 }
 
