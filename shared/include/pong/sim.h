@@ -75,6 +75,7 @@ struct SimState {
 // Deterministic ball serve direction and position based on random seed and whoever scored last
     inline void reset_sim(SimState& s, uint32_t seed) {
         s = SimState{}; // Clear state
+        s.serve_tick = 180;
         s.rng_state = seed;
         s.last_scored_on = s.next_rand() % 2; // Random first server
 

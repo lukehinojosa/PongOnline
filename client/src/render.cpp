@@ -128,6 +128,22 @@ void draw_game(const RenderState& rs) {
             g_app.show_menu = false;
         if (draw_button("Main Menu", SCREEN_W / 2 - 100, gmy + 40, 200, 40))
             reset_app();
+    } else if (!g_app.game_started) {
+        // Draw a syncing overlay while the Zero-Snap Handshake completes
+        DrawRectangle(0, gt, SCREEN_W, SCREEN_H - gt, Color{0, 0, 0, 160});
+        const char* msg = "SYNCING...";
+        DrawText(msg, SCREEN_W / 2 - MeasureText(msg, 40) / 2, gmy - 20, 40, YELLOW);
+    } else if (g_app.sim.serve_tick > g_app.sim.tick) {
+        // 3-2-1 Countdown Timer
+        if (g_app.sim.score_a == 0 && g_app.sim.score_b == 0) {
+            int ticks_left = g_app.sim.serve_tick - g_app.sim.tick;
+            int seconds_left = (ticks_left + TICK_HZ - 1) / TICK_HZ; // Ceiling division
+
+            if (seconds_left > 0) {
+                const char* count_str = TextFormat("%d", seconds_left);
+                DrawText(count_str, SCREEN_W / 2 - MeasureText(count_str, 120) / 2, gmy - 60, 120, WHITE);
+            }
+        }
     }
 }
 
