@@ -170,7 +170,7 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
 
     // Paddle A (Host) — symmetric Schrödinger spawning.
     // The host is authoritative for this face; it sends AuthCollisionMsg.
-    if (prev_ball_x > a_face && s.ball_x <= a_face) {
+    if (prev_ball_x >= a_face && s.ball_x < a_face) {
         if (!s.has_schrodinger) {
             s.has_schrodinger  = true;
             s.schro_side       = 0;
@@ -193,7 +193,15 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
             s.ball_vx = s.s_vx[s.opt_hit_type]; s.ball_vy = s.s_vy[s.opt_hit_type];
 
             if (s.has_pending_auth && s.pending_auth_side == s.schro_side) {
-                resolve_schrodinger(s, s.pending_auth_hit_type, s.pending_auth_side);
+                // Prevent stale packets from a previous round from auto-resolving
+                int32_t tick_diff = static_cast<int32_t>(s.pending_auth_tick) - static_cast<int32_t>(s.schro_spawn_tick);
+
+                // Only consume the auth if it was generated for this exact collision
+                if (tick_diff > -5 && tick_diff < 5) {
+                    resolve_schrodinger(s, s.pending_auth_hit_type, s.pending_auth_side);
+                }
+
+                // Always clear the landmine, even if it was stale
                 s.has_pending_auth = false;
             }
         }
@@ -201,7 +209,7 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
 
     // Paddle B (Guest) — symmetric Schrödinger spawning.
     // The guest is authoritative for this face; it sends AuthCollisionMsg.
-    if (prev_ball_x < b_face && s.ball_x >= b_face) {
+    if (prev_ball_x <= b_face && s.ball_x > b_face) {
         if (!s.has_schrodinger) {
             s.has_schrodinger  = true;
             s.schro_side       = 1;
@@ -223,7 +231,15 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
             s.ball_vx = s.s_vx[s.opt_hit_type]; s.ball_vy = s.s_vy[s.opt_hit_type];
 
             if (s.has_pending_auth && s.pending_auth_side == s.schro_side) {
-                resolve_schrodinger(s, s.pending_auth_hit_type, s.pending_auth_side);
+                // Prevent stale packets from a previous round from auto-resolving
+                int32_t tick_diff = static_cast<int32_t>(s.pending_auth_tick) - static_cast<int32_t>(s.schro_spawn_tick);
+
+                // Only consume the auth if it was generated for this exact collision
+                if (tick_diff > -5 && tick_diff < 5) {
+                    resolve_schrodinger(s, s.pending_auth_hit_type, s.pending_auth_side);
+                }
+
+                // Always clear the landmine, even if it was stale
                 s.has_pending_auth = false;
             }
         }

@@ -147,12 +147,15 @@ void start_as_guest(const std::string& code) {
                     g_app.winner = 0;
                     g_app.accumulator_ms = 0.0;
 
-                    // Reset handshake states so the Guest sends its trigger packet again
+                    // Reset handshake states
                     g_app.game_started = false;
                     g_app.guest_ready = false;
                     g_app.remote_ever_sent_paddle = false;
 
-                    // Reset rendering targets so the paddles instantly snap to center
+                    // Clear any lingering collision resends
+                    g_app.auth_resend = {};
+
+                    // Reset rendering targets
                     g_app.render_remote_paddle_y = static_cast<float>((pong::FIELD_H - pong::PADDLE_H) / 2) / 100.f;
                     g_app.target_remote_paddle_y = static_cast<float>((pong::FIELD_H - pong::PADDLE_H) / 2) / 100.f;
                 }
