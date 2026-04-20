@@ -31,6 +31,7 @@ void start_as_host() {
         g_app.sim = pong::SimState{};
         g_app.game_over = false;
         g_app.winner = 0;
+        g_app.game_started = false;
         g_app.local_tick = 0;
         g_app.accumulator_ms = 0.0;
         g_app.last_frame_ms = now_ms();
@@ -105,41 +106,42 @@ void start_as_guest(const std::string& code) {
         g_app.last_frame_ms = now_ms();
         g_app.remote_ever_sent_paddle = false;
 
+        // Zero-Snap Handshake states
+        g_app.game_started = false;
+        g_app.guest_ready = false;
+        g_app.guest_start_timer = 0.0;
+
         TraceLog(LOG_INFO, "[guest] connected to host");
         send_username();
     };
 
     g_app.transport->on_message = [](std::span<const uint8_t> buf) {
-        if (buf.empty()) return;
+        if (buf.empty())
+            return;
         auto type = pong::peek_type(buf);
 
         if (type == pong::MsgType::PaddleState) {
-
-            // Ignore host game state until RTT is valid
-            if (!g_app.rtt_valid)
-                return;
-
             pong::DecodedPaddleState ps;
             if (pong::decode_paddle_state(buf, ps)) {
-                if (!g_app.remote_ever_sent_paddle) {
-                    // Calculate sub-tick remainder
-                    double one_way_ms = g_app.rtt_ms / 2.0;
-                    uint32_t one_way_ticks = static_cast<uint32_t>(one_way_ms / (1000.0 / 60.0));
-                    double remainder_ms = one_way_ms - (one_way_ticks * (1000.0 / 60.0));
 
-                    g_app.sim.tick = ps.tick + one_way_ticks;
-                    g_app.latest_remote_tick = ps.tick;
-
-                    // Preserve the fractional millisecond offset
-                    g_app.accumulator_ms = remainder_ms;
-                }
-                // Detect host resetting the game via a significant tick drop
-                if (g_app.game_over && ps.tick < g_app.latest_remote_tick - 10) {
-                    g_app.game_over = false;
-                    g_app.winner = 0;
-                    g_app.local_tick = 0;
+                // Detect Restart; If the host suddenly sends tick 0, they restarted the game
+                if (g_app.latest_remote_tick > 0 && ps.tick == 0) {
+                    TraceLog(LOG_INFO, "[guest] Host restarted game");
                     g_app.sim = pong::SimState{};
                     g_app.latest_remote_tick = 0;
+                    g_app.local_tick = 0;
+                    g_app.game_over = false;
+                    g_app.winner = 0;
+                    g_app.accumulator_ms = 0.0;
+
+                    // Reset handshake states so the Guest sends its trigger packet again
+                    g_app.game_started = false;
+                    g_app.guest_ready = false;
+                    g_app.remote_ever_sent_paddle = false;
+
+                    // Reset rendering targets so the paddles instantly snap to center
+                    g_app.render_remote_paddle_y = static_cast<float>((pong::FIELD_H - pong::PADDLE_H) / 2) / 100.f;
+                    g_app.target_remote_paddle_y = static_cast<float>((pong::FIELD_H - pong::PADDLE_H) / 2) / 100.f;
                 }
 
                 // Track the highest tick seen from the host
@@ -161,8 +163,6 @@ void start_as_guest(const std::string& code) {
                 if (rtt_diff >= 0 && rtt_diff < 10000) {
                     double rtt = static_cast<double>(rtt_diff);
 
-                    g_app.rtt_valid = true;
-
                     if (g_app.time_offset_ms == 0.0) {
                         g_app.rtt_ms = static_cast<float>(rtt);
                     } else {
@@ -173,6 +173,12 @@ void start_as_guest(const std::string& code) {
                     double estimated_server_now = static_cast<double>(server_ts) + one_way;
                     double raw_offset = estimated_server_now - static_cast<double>(now32);
                     g_app.time_offset_ms = (g_app.time_offset_ms == 0.0) ? raw_offset : (0.8 * g_app.time_offset_ms + 0.2 * raw_offset);
+
+                    // Wait for 5 pongs to stabilize the EWMA before unlocking
+                    g_app.valid_pong_count++;
+                    if (g_app.valid_pong_count >= 5) {
+                        g_app.rtt_valid = true;
+                    }
                 }
             }
         } else if (type == pong::MsgType::AuthCollision) {

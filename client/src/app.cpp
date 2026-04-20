@@ -14,6 +14,9 @@ void reset_app() {
     g_app.game_over = false;
     g_app.show_menu = false;
     g_app.host_closed = false;
+    g_app.game_started = false;
+    g_app.guest_ready = false;
+    g_app.guest_start_timer = 0.0;
     g_app.winner = 0;
     g_app.opponent_username.clear();
     g_app.join_code_edit = TextEdit{};
@@ -23,6 +26,7 @@ void reset_app() {
     g_app.last_ping_sent_ms = -1000.0;
     g_app.rtt_ms = 60.f;
     g_app.rtt_valid = false;
+    g_app.valid_pong_count = 0;
     g_app.time_offset_ms = 0.0;
     g_app.clock_drift_multiplier = 1.0f;
 

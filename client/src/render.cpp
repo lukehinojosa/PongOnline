@@ -16,8 +16,9 @@ RenderState compute_render_state() {
     float target_ball_x = (float)g_app.sim.ball_x / 100.f;
     float target_ball_y = (float)g_app.sim.ball_y / 100.f;
 
-    // Distance check: If the ball teleports (e.g., goal reset), snap it immediately
-    if (std::abs(target_ball_x - g_app.render_ball_x) > 50.f) {
+    // Distance check; If the ball teleports (e.g., goal reset or timeline snap), snap it immediately
+    if (std::abs(target_ball_x - g_app.render_ball_x) > 30.f ||
+        std::abs(target_ball_y - g_app.render_ball_y) > 30.f) {
         g_app.render_ball_x = target_ball_x;
         g_app.render_ball_y = target_ball_y;
     } else {

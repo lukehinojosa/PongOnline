@@ -95,8 +95,17 @@ static void main_loop() {
                 g_app.sim = pong::SimState{};
                 g_app.game_over = false;
                 g_app.winner = 0;
-                g_app.last_remote_paddle_ms = now_ms();
+
+                // Reset sync states to trigger a fresh zero-snap handshake
+                g_app.game_started = false;
+                g_app.local_tick = 0;
+                g_app.last_remote_paddle_ms = now;
                 g_app.remote_ever_sent_paddle = false;
+
+                // Force-broadcast a tick-0 packet to notify the Guest of the restart
+                uint8_t pbuf[pong::PADDLE_STATE_MAX_BYTES];
+                int plen = pong::encode_paddle_state(pbuf, 0, g_app.sim.paddle_a_y);
+                g_app.transport->send({ pbuf, static_cast<size_t>(plen) });
             }
         } else {
             // Symmetrical Timeout Logic
@@ -115,9 +124,48 @@ static void main_loop() {
 
             int current_max_ticks = MAX_TICKS_FRAME;
 
-            // Guest continuous pinging; runs even if waiting for sync
+            // Zero-Snap Synchronized Start Handshake
+            if (!g_app.game_started) {
+                if (g_app.role == pong::Role::Host) {
+                    // Host waits for Guest to send its trigger packet
+                    if (g_app.remote_ever_sent_paddle) {
+                        g_app.game_started = true;
+                        g_app.last_remote_paddle_ms = now;
+                        g_app.accumulator_ms = 0.0;
+                    }
+                } else if (g_app.role == pong::Role::Guest) {
+                    // Guest waits for 5 pongs to establish an accurate RTT baseline
+                    if (g_app.rtt_valid && !g_app.guest_ready) {
+                        g_app.guest_ready = true;
+
+                        // Schedule the start time to match exactly when the Host receives the trigger
+                        g_app.guest_start_timer = now + (g_app.rtt_ms / 2.0);
+
+                        // Fire the trigger packet to the Host right now
+                        uint8_t pbuf[pong::PADDLE_STATE_MAX_BYTES];
+                        int plen = pong::encode_paddle_state(pbuf, 0, g_app.sim.paddle_b_y);
+                        g_app.transport->send({ pbuf, static_cast<size_t>(plen) });
+                    }
+
+                    // When the scheduled transit time finishes, unlock the game
+                    if (g_app.guest_ready && now >= g_app.guest_start_timer) {
+                        g_app.game_started = true;
+
+                        // The Host is at tick 0 right now. Their first packet won't arrive until a half-ping from now.
+                        g_app.last_remote_paddle_ms = now + (g_app.rtt_ms / 2.0);
+                        g_app.accumulator_ms = 0.0;
+                    }
+                }
+
+                // Keep the simulation clock frozen while waiting
+                g_app.accumulator_ms = 0.0;
+            }
+
+            // Guest continuous pinging (runs even if waiting for sync)
             if (g_app.role == pong::Role::Guest) {
-                if (now - g_app.last_ping_sent_ms >= PING_INTERVAL_MS) {
+                double current_ping_interval = g_app.rtt_valid ? PING_INTERVAL_MS : 50.0;
+
+                if (now - g_app.last_ping_sent_ms >= current_ping_interval) {
                     g_app.last_ping_sent_ms = now;
                     uint32_t ts32 = static_cast<uint32_t>(static_cast<uint64_t>(now) & 0xFFFFFFFF);
                     uint8_t pbuf[pong::PING_BYTES];
@@ -125,46 +173,61 @@ static void main_loop() {
                 }
             }
 
-            // PLL tick-pacing (guest only, strictly gated by rtt_valid)
-            if (g_app.role == pong::Role::Guest && g_app.remote_ever_sent_paddle && g_app.rtt_valid) {
+            // PLL tick-pacing (guest only, strictly gated by game_started)
+            if (g_app.role == pong::Role::Guest && g_app.game_started) {
 
-                // Math in milliseconds first, then convert to ticks at the very end
                 double one_way_ms = g_app.rtt_ms / 2.0;
-                double elapsed_ms = std::max(0.0, now - g_app.last_remote_paddle_ms);
-
+                double elapsed_ms = now - g_app.last_remote_paddle_ms;
                 double total_target_ms = (g_app.latest_remote_tick * TICK_MS) + one_way_ms + elapsed_ms;
                 uint32_t target_tick = static_cast<uint32_t>(total_target_ms / TICK_MS);
 
-                // The Hard Deficit
-                int hard_deficit = static_cast<int>(target_tick) - static_cast<int>(g_app.sim.tick);
+                double deficit_ms = total_target_ms - (g_app.sim.tick * TICK_MS);
+                int hard_deficit = static_cast<int>(deficit_ms / TICK_MS);
 
-                // Only snap if fallen significantly behind
-                if (hard_deficit > 4) {
-                    double required_ms = hard_deficit * TICK_MS;
-                    // Prevent double-dipping if delta already captured the lag spike
-                    if (g_app.accumulator_ms < required_ms) {
-                        g_app.accumulator_ms = required_ms;
+                // Check if in the 2-second warmup phase
+                bool is_warmup = (g_app.sim.tick < TICK_HZ * 2);
+
+                if (is_warmup) {
+                    // Aggressive mode; Hidden behind the match start
+                    if (hard_deficit > 0) {
+                        // Instantly fast-forward to catch up
+                        if (g_app.accumulator_ms < deficit_ms) {
+                            g_app.accumulator_ms = deficit_ms;
+                        }
+                        current_max_ticks = hard_deficit + MAX_TICKS_FRAME;
+                    } else if (hard_deficit < 0) {
+                        // Instantly freeze the simulation to let the Host catch up
+                        g_app.accumulator_ms = 0.0;
+                        current_max_ticks = 0;
                     }
-                    current_max_ticks = hard_deficit + MAX_TICKS_FRAME;
-                }
-
-                // The Soft Deficit
-                int tick_diff = static_cast<int>(target_tick) - static_cast<int>(g_app.sim.tick);
-
-                if (tick_diff > 0)
-                    g_app.clock_drift_multiplier = 1.01f; // Gently speed up
-                else if (tick_diff < 0)
-                    g_app.clock_drift_multiplier = 0.99f; // Gently slow down
-                else
+                    // No gentle drift during warmup; instant snaps
                     g_app.clock_drift_multiplier = 1.0f;
+
+                } else {
+                    // Gantle mode; Normal gameplay
+                    if (hard_deficit > 4) {
+                        if (g_app.accumulator_ms < deficit_ms) {
+                            g_app.accumulator_ms = deficit_ms;
+                        }
+                        current_max_ticks = hard_deficit + MAX_TICKS_FRAME;
+                    }
+
+                    int tick_diff = static_cast<int>(target_tick) - static_cast<int>(g_app.sim.tick);
+
+                    if (tick_diff > 0)
+                        g_app.clock_drift_multiplier = 1.01f;
+                    else if (tick_diff < 0)
+                        g_app.clock_drift_multiplier = 0.99f;
+                    else
+                        g_app.clock_drift_multiplier = 1.0f;
+                }
             }
 
             g_app.accumulator_ms += delta * g_app.clock_drift_multiplier;
             int ticks_run = 0;
 
             // Gate the simulation based on valid RTT
-            bool can_simulate = (g_app.role == pong::Role::Host) ||
-                                (g_app.role == pong::Role::Guest && g_app.rtt_valid);
+            bool can_simulate = g_app.game_started;
 
             if (can_simulate) {
                 while (g_app.accumulator_ms >= TICK_MS && ticks_run < current_max_ticks) {

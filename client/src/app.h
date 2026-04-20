@@ -40,6 +40,9 @@ struct App {
     bool game_over = false;
     bool show_menu = false;
     bool host_closed = false;
+    bool game_started = false;
+    bool guest_ready = false;
+    double guest_start_timer = 0.0;
     int winner = 0;
 
     // Persistent text inputs
@@ -55,6 +58,7 @@ struct App {
     double last_ping_sent_ms = -1000.0;
     float rtt_ms = 60.f;
     bool rtt_valid = false;
+    int valid_pong_count = 0;
 
     // PLL clock synchronisation (guest only)
     double time_offset_ms = 0.0;

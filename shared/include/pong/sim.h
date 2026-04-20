@@ -72,13 +72,11 @@ inline int32_t serve_vx(const SimState& s) {
 inline void resolve_schrodinger(SimState& s, uint8_t actual_hit_type, uint8_t side) {
     if (!s.has_schrodinger) return;
 
-    if (actual_hit_type != s.opt_hit_type) {
-        // Prediction was wrong! Snap the real ball to the correct timeline.
-        s.ball_x = s.s_x[actual_hit_type];
-        s.ball_y = s.s_y[actual_hit_type];
-        s.ball_vx = s.s_vx[actual_hit_type];
-        s.ball_vy = s.s_vy[actual_hit_type];
-    }
+    // Always snap the real ball to the authoritative timeline.
+    s.ball_x = s.s_x[actual_hit_type];
+    s.ball_y = s.s_y[actual_hit_type];
+    s.ball_vx = s.s_vx[actual_hit_type];
+    s.ball_vy = s.s_vy[actual_hit_type];
 
     s.has_schrodinger = false;
     for(int i = 0; i < 4; i++) {
@@ -221,8 +219,10 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
 
             if (s.s_y[i] <= 0) {s.s_y[i] = 0; s.s_vy[i] = -s.s_vy[i]; }
             if (s.s_y[i] >= FIELD_H - BALL_SIZE) { s.s_y[i] = FIELD_H - BALL_SIZE; s.s_vy[i] = -s.s_vy[i]; }
-            if (s.s_x[i] < -BALL_SIZE) { s.s_x[i] = -BALL_SIZE - 1; s.s_vx[i] = 0; s.s_vy[i] = 0; }
-            if (s.s_x[i] > FIELD_W) { s.s_x[i] = FIELD_W + 1; s.s_vx[i] = 0; s.s_vy[i] = 0; }
+
+            // No horizontal clamping and zeroing.
+            // The ghost ball needs to retain its velocity and true overshoot distance
+            // to accurately calculate retrospective goal timers.
         }
     }
 
@@ -231,19 +231,27 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
         // Safety exits act as goal triggers
         if (s.ball_x < 0) {
             s.score_b++;
+
+            // Calculate how many ticks ago the ball actually crossed the line
+            int32_t overdue_ticks = (0 - s.ball_x) / (-s.ball_vx);
+
             s.ball_x = FIELD_W / 2;
             s.ball_y = FIELD_H / 2;
             s.ball_vx = 0;
             s.ball_vy = 0;
-            s.serve_tick = s.tick + 60;
+            s.serve_tick = s.tick + 60 - overdue_ticks;
         }
         if (s.ball_x > FIELD_W) {
             s.score_a++;
+
+            // Calculate how many ticks ago the ball actually crossed the line
+            int32_t overdue_ticks = (s.ball_x - FIELD_W) / s.ball_vx;
+
             s.ball_x = FIELD_W / 2;
             s.ball_y = FIELD_H / 2;
             s.ball_vx = 0;
             s.ball_vy = 0;
-            s.serve_tick = s.tick + 60;
+            s.serve_tick = s.tick + 60 - overdue_ticks;
         }
     }
 
