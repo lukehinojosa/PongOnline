@@ -17,6 +17,7 @@ enum class MsgType : uint8_t {
     Pong = 0x31,
     Username = 0x40,
     AuthCollision = 0x50,
+    Seed = 0x60,
     Disconnect = 0xFF,
 };
 
@@ -90,6 +91,12 @@ struct DisconnectMsg {
     uint8_t reason;
 };
 static_assert(sizeof(DisconnectMsg) == 2);
+
+struct SeedMsg {
+    uint8_t msg_id = static_cast<uint8_t>(MsgType::Seed);
+    uint32_t seed;
+};
+static_assert(sizeof(SeedMsg) == 5);
 
 #pragma pack(pop)
 

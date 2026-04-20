@@ -33,6 +33,7 @@ struct App {
     pong::Role role = pong::Role::None;
     std::unique_ptr<pong::Transport> transport;
     pong::SimState sim;
+    uint32_t current_seed = 0;
 
     std::string lobby_code;
     bool peer_connected = false;

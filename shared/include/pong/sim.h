@@ -9,7 +9,7 @@ namespace pong {
 // across native and WASM builds.
 static constexpr int FIELD_W = 80000; // 800px * 100
 static constexpr int FIELD_H = 60000; // 600px * 100
-static constexpr int PADDLE_H = 8000; // 80px * 100
+static constexpr int PADDLE_H = 5000; // 50px * 100
 static constexpr int PADDLE_W = 1200; // 12px * 100
 static constexpr int BALL_SIZE = 1000; // 10px * 100
 static constexpr int BALL_SPEED = 500; // 5px/tick * 100
@@ -60,13 +60,30 @@ struct SimState {
     uint32_t pending_auth_tick = 0;
     uint8_t pending_auth_hit_type = 0;
     uint8_t pending_auth_side = 0;
+
+    // PRNG and Serve State
+    uint32_t rng_state = 12345;
+    int8_t last_scored_on = 0; // 0 = host, 1 = guest
+
+    // Simple deterministic LCG
+    uint32_t next_rand() {
+        rng_state = (rng_state * 1103515245 + 12345) & 0x7fffffff;
+        return rng_state;
+    }
 };
 
-// Deterministic ball serve direction based on total goals scored.
-// Even total → serve right (toward guest), odd total → serve left (toward host).
-inline int32_t serve_vx(const SimState& s) {
-    return ((s.score_a + s.score_b) % 2 == 0) ? BALL_SPEED : -BALL_SPEED;
-}
+// Deterministic ball serve direction and position based on random seed and whoever scored last
+    inline void reset_sim(SimState& s, uint32_t seed) {
+        s = SimState{}; // Clear state
+        s.rng_state = seed;
+        s.last_scored_on = s.next_rand() % 2; // Random first server
+
+        // Randomize initial Y position
+        s.ball_x = FIELD_W / 2;
+        int32_t min_y = 5000; // 50px padding from the walls
+        int32_t max_y = FIELD_H - 5000;
+        s.ball_y = min_y + (s.next_rand() % (max_y - min_y));
+    }
 
 // Called by either client when an AuthCollisionMsg arrives.
 inline void resolve_schrodinger(SimState& s, uint8_t actual_hit_type, uint8_t side) {
@@ -106,9 +123,9 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
     // --- Check Serve Cooldown ---
     if (s.serve_tick > 0) {
         if (s.tick >= s.serve_tick) {
-            // Unfreeze the ball
-            s.ball_vx = serve_vx(s);
-            s.ball_vy = BALL_SPEED;
+            // Serve diagonally to the player who was scored on
+            s.ball_vx = (s.last_scored_on == 0) ? -BALL_SPEED_DIAG : BALL_SPEED_DIAG;
+            s.ball_vy = (s.next_rand() % 2 == 0) ? BALL_SPEED_DIAG : -BALL_SPEED_DIAG;
 
             // Catch up missed ticks if the unfreeze happened late due to latency
             uint32_t missed = s.tick - s.serve_tick;
@@ -135,7 +152,7 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
         }
     }
 
-    // --- Real ball (ALWAYS UPDATES — optimistic prediction) ---
+    // Real ball always updates; optimistic prediction
     int32_t prev_ball_x = s.ball_x;
     s.ball_x += s.ball_vx;
     s.ball_y += s.ball_vy;
@@ -231,26 +248,30 @@ inline void sim_tick(SimState& s, int8_t dir_a, int8_t dir_b) {
         // Safety exits act as goal triggers
         if (s.ball_x < 0) {
             s.score_b++;
+            s.last_scored_on = 0; // Host got scored on
 
             // Calculate how many ticks ago the ball actually crossed the line
             int32_t overdue_ticks = (0 - s.ball_x) / (-s.ball_vx);
 
             s.ball_x = FIELD_W / 2;
-            s.ball_y = FIELD_H / 2;
-            s.ball_vx = 0;
-            s.ball_vy = 0;
+            int32_t min_y = 5000;
+            int32_t max_y = FIELD_H - 5000;
+            s.ball_y = min_y + (s.next_rand() % (max_y - min_y));
+            s.ball_vx = 0; s.ball_vy = 0;
             s.serve_tick = s.tick + 60 - overdue_ticks;
         }
         if (s.ball_x > FIELD_W) {
             s.score_a++;
+            s.last_scored_on = 1; // Guest got scored on
 
             // Calculate how many ticks ago the ball actually crossed the line
             int32_t overdue_ticks = (s.ball_x - FIELD_W) / s.ball_vx;
 
             s.ball_x = FIELD_W / 2;
-            s.ball_y = FIELD_H / 2;
-            s.ball_vx = 0;
-            s.ball_vy = 0;
+            int32_t min_y = 5000;
+            int32_t max_y = FIELD_H - 5000;
+            s.ball_y = min_y + (s.next_rand() % (max_y - min_y));
+            s.ball_vx = 0; s.ball_vy = 0;
             s.serve_tick = s.tick + 60 - overdue_ticks;
         }
     }

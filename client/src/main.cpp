@@ -92,7 +92,9 @@ static void main_loop() {
         if (g_app.game_over) {
             g_app.accumulator_ms = 0.0;
             if (IsKeyPressed(KEY_SPACE) && g_app.role == pong::Role::Host) {
-                g_app.sim = pong::SimState{};
+                // Generate a new seed for the rematch and reset the sim
+                g_app.current_seed = GetRandomValue(0, 0x7fffffff);
+                pong::reset_sim(g_app.sim, g_app.current_seed);
                 g_app.game_over = false;
                 g_app.winner = 0;
 
@@ -101,6 +103,11 @@ static void main_loop() {
                 g_app.local_tick = 0;
                 g_app.last_remote_paddle_ms = now;
                 g_app.remote_ever_sent_paddle = false;
+
+                // Broadcast the new seed to the guest before sending the tick-0 paddle
+                uint8_t seed_buf[pong::SEED_BYTES];
+                int slen = pong::encode_seed(seed_buf, g_app.current_seed);
+                g_app.transport->send({ seed_buf, static_cast<size_t>(slen) });
 
                 // Force-broadcast a tick-0 packet to notify the Guest of the restart
                 uint8_t pbuf[pong::PADDLE_STATE_MAX_BYTES];

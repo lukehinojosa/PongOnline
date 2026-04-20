@@ -376,4 +376,22 @@ inline bool decode_auth_collision(std::span<const uint8_t> buf,
     return true;
 }
 
+static constexpr int SEED_BYTES = 5;
+
+inline int encode_seed(uint8_t* buf, uint32_t seed) {
+    SeedMsg m;
+    m.seed = seed;
+    std::memcpy(buf, &m, sizeof(m));
+    return sizeof(m);
+}
+
+inline bool decode_seed(std::span<const uint8_t> buf, uint32_t& seed) {
+    if (buf.size() < sizeof(SeedMsg) || buf[0] != static_cast<uint8_t>(MsgType::Seed))
+        return false;
+    SeedMsg m;
+    std::memcpy(&m, buf.data(), sizeof(m));
+    seed = m.seed;
+    return true;
+}
+
 } // namespace pong

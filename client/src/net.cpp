@@ -27,8 +27,11 @@ void start_as_host() {
     g_app.transport->on_open = []() {
         g_app.peer_connected = true;
 
+        // Generate and apply the initial seed
+        g_app.current_seed = GetRandomValue(0, 0x7fffffff);
+        pong::reset_sim(g_app.sim, g_app.current_seed);
+
         // Reset state so new guests don't inherit a massive tick deficit
-        g_app.sim = pong::SimState{};
         g_app.game_over = false;
         g_app.winner = 0;
         g_app.game_started = false;
@@ -38,6 +41,11 @@ void start_as_host() {
 
         TraceLog(LOG_INFO, "[host] guest connected");
         send_username();
+
+        // Send the initial seed to the guest
+        uint8_t seed_buf[pong::SEED_BYTES];
+        int slen = pong::encode_seed(seed_buf, g_app.current_seed);
+        g_app.transport->send({ seed_buf, static_cast<size_t>(slen) });
     };
     g_app.transport->on_message = [](std::span<const uint8_t> buf) {
         if (buf.empty()) return;
@@ -120,14 +128,19 @@ void start_as_guest(const std::string& code) {
             return;
         auto type = pong::peek_type(buf);
 
-        if (type == pong::MsgType::PaddleState) {
+        if (type == pong::MsgType::Seed) {
+            uint32_t seed;
+            if (pong::decode_seed(buf, seed)) {
+                g_app.current_seed = seed;
+                pong::reset_sim(g_app.sim, g_app.current_seed);
+            }
+        } else if (type == pong::MsgType::PaddleState) {
             pong::DecodedPaddleState ps;
             if (pong::decode_paddle_state(buf, ps)) {
 
                 // Detect Restart; If the host suddenly sends tick 0, they restarted the game
                 if (g_app.latest_remote_tick > 0 && ps.tick == 0) {
                     TraceLog(LOG_INFO, "[guest] Host restarted game");
-                    g_app.sim = pong::SimState{};
                     g_app.latest_remote_tick = 0;
                     g_app.local_tick = 0;
                     g_app.game_over = false;
