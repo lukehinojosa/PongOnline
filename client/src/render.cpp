@@ -150,7 +150,7 @@ void draw_game(const RenderState& rs) {
 void draw_lobby() {
     ClearBackground(BLACK);
     if (g_app.role == pong::Role::None) {
-        DrawText("ONLINE PONG", SCREEN_W / 2 - 120, 180, 40, GREEN);
+        DrawText("SCHRÖDINGER'S PONG", SCREEN_W / 2 - 225, 180, 40, GREEN);
         if (draw_button("Host a Game", SCREEN_W / 2 - 100, 270, 200, 40)) start_as_host();
 
         if (draw_button("Join a Game", SCREEN_W / 2 - 100, 330, 200, 40)) {

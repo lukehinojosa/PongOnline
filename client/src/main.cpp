@@ -359,10 +359,10 @@ int main() {
 
 #ifndef PONG_WASM
     SetConfigFlags(FLAG_VSYNC_HINT | FLAG_WINDOW_RESIZABLE);
-    InitWindow(1280, 720, "Online Pong");
+    InitWindow(1280, 720, "Schrödinger's Pong");
 #else
     // Start the WASM canvas at the current browser viewport size.
-    InitWindow(js_viewport_w(), js_viewport_h(), "Online Pong");
+    InitWindow(js_viewport_w(), js_viewport_h(), "Schrödinger's Pong");
     js_setup_paste_listener();
 #endif
     SetExitKey(0);

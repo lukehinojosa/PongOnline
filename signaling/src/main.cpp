@@ -257,7 +257,7 @@ static void handle_client(std::shared_ptr<rtc::WebSocket> ws) {
 }
 
 int main() {
-    std::cout << "[signaling] Online Pong signaling server starting on port 9000\n";
+    std::cout << "[signaling] Schrödinger's Pong signaling server starting on port 9000\n";
 
     start_cloudflared_tunnel(9000);
 
