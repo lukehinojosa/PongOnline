@@ -170,14 +170,21 @@ void wire_guest_game_callbacks() {
 void start_as_host() {
     g_app.role = pong::Role::Host;
 
-    if (g_app.server_list.empty()) g_app.server_list.push_back(g_app.signaling_edit.text);
+    // Build the list of URLs to try. If the text box URL isn't in the list, add it.
+    std::vector<std::string> urls_to_try = g_app.server_list;
+    if (std::find(urls_to_try.begin(), urls_to_try.end(), g_app.signaling_edit.text) == urls_to_try.end()) {
+        urls_to_try.push_back(g_app.signaling_edit.text);
+    }
 
     // Clean up any old attempts
     g_pending_transports.clear();
     g_app.transport.reset();
     g_failed_races = 0;
 
-    for (const std::string& url : g_app.server_list) {
+    // Capture total URLs to check for complete failure later
+    int total_urls = urls_to_try.size();
+
+    for (const std::string& url : urls_to_try) {
         auto t = pong::make_transport();
         pong::Transport* raw_t = t.get(); // Raw pointer to identify the winner
 
@@ -204,13 +211,15 @@ void start_as_host() {
             TraceLog(LOG_INFO, "[host] Race won. Connected to: %s | Lobby: %s", url.c_str(), code.c_str());
         };
 
-        t->on_close = [url]() {
+        // Capture total_urls by value
+        t->on_close = [url, total_urls]() {
             if (g_app.transport) return; // Race already won, ignore losers closing
             g_failed_races++;
             TraceLog(LOG_WARNING, "[host] Connection failed for: %s", url.c_str());
-            if (g_failed_races >= (int)g_app.server_list.size()) {
+
+            if (g_failed_races >= total_urls) {
                 g_app.role = pong::Role::None; // All servers failed
-                TraceLog(LOG_ERROR, "[host] All signaling servers failed to connect.");
+                TraceLog(LOG_ERROR, "[host] All signaling servers (including fallback) failed to connect.");
             }
         };
 
@@ -223,13 +232,19 @@ void start_as_guest(const std::string& code) {
     g_app.role = pong::Role::Guest;
     g_app.connecting = true;
 
-    if (g_app.server_list.empty()) g_app.server_list.push_back(g_app.signaling_edit.text);
+    // Build the list of URLs to try. If the text box URL isn't in the list, add it.
+    std::vector<std::string> urls_to_try = g_app.server_list;
+    if (std::find(urls_to_try.begin(), urls_to_try.end(), g_app.signaling_edit.text) == urls_to_try.end()) {
+        urls_to_try.push_back(g_app.signaling_edit.text);
+    }
 
     g_pending_transports.clear();
     g_app.transport.reset();
     g_failed_races = 0;
 
-    for (const std::string& url : g_app.server_list) {
+    int total_urls = urls_to_try.size();
+
+    for (const std::string& url : urls_to_try) {
         auto t = pong::make_transport();
         pong::Transport* raw_t = t.get();
 
@@ -274,15 +289,16 @@ void start_as_guest(const std::string& code) {
             send_username();
         };
 
-        t->on_close = [url]() {
+        t->on_close = [url, total_urls]() {
             if (g_app.transport) return; // Race already won
             g_failed_races++;
             TraceLog(LOG_WARNING, "[guest] Connection failed for: %s", url.c_str());
-            if (g_failed_races >= (int)g_app.server_list.size()) {
+
+            if (g_failed_races >= total_urls) {
                 g_app.connecting = false;
                 g_app.join_code_edit = TextEdit{};
                 g_app.role = pong::Role::Guest;
-                TraceLog(LOG_ERROR, "[guest] All servers failed to broker connection.");
+                TraceLog(LOG_ERROR, "[guest] All servers (including fallback) failed to broker connection.");
             }
         };
 
@@ -420,7 +436,10 @@ void process_pending_server_list() {
 std::mutex g_lobby_mutex;
 
 void refresh_lobby_list() {
-    if (g_app.server_list.empty()) g_app.server_list.push_back(g_app.signaling_edit.text);
+    std::vector<std::string> urls_to_try = g_app.server_list;
+    if (std::find(urls_to_try.begin(), urls_to_try.end(), g_app.signaling_edit.text) == urls_to_try.end()) {
+        urls_to_try.push_back(g_app.signaling_edit.text);
+    }
 
     // Clear the current list immediately so the UI shows it's refreshing
     {
@@ -428,12 +447,16 @@ void refresh_lobby_list() {
         g_app.lobby_list.clear();
     }
 
-    // Ping all servers in your fallback list
-    for (const std::string& url : g_app.server_list) {
+    // Ping all servers in your target list concurrently
+    for (const std::string& url : urls_to_try) {
         pong::fetch_lobbies(url, [](const std::vector<pong::LobbyInfo>& lobbies) {
-            // Safely update the global app state
             std::lock_guard<std::mutex> lk(g_lobby_mutex);
-            g_app.lobby_list = lobbies;
+
+            // Append so if the fallback server and main server both somehow respond,
+            // a unified list of lobbies is received.
+            if (!lobbies.empty()) {
+                g_app.lobby_list.insert(g_app.lobby_list.end(), lobbies.begin(), lobbies.end());
+            }
         });
     }
 }
