@@ -7,6 +7,14 @@
 
 namespace pong {
 
+struct LobbyInfo {
+    std::string code;
+    std::string host_username;
+    int player_count = 1;
+};
+
+using OnLobbiesFetched = std::function<void(std::vector<LobbyInfo>)>;
+
 // Abstract peer transport
 
 struct Transport {
@@ -24,8 +32,8 @@ struct Transport {
 
     virtual ~Transport() = default;
 
-    // Host: connect to signaling server and request a lobby code.
-    virtual void host(const std::string& signaling_url) = 0;
+    // Host: connect to signaling server, send username, and request a lobby code.
+    virtual void host(const std::string& signaling_url, const std::string& username) = 0;
 
     // Guest: connect to signaling server and join with the given code.
     virtual void join(const std::string& signaling_url, const std::string& code) = 0;
@@ -48,5 +56,8 @@ struct Transport {
 // Factory; returns the correct implementation for the current platform.
 // Defined in transport_native.cpp or transport_wasm.cpp.
 std::unique_ptr<Transport> make_transport();
+
+// Freestanding function to query a signaling server for active lobbies
+void fetch_lobbies(const std::string& signaling_url, OnLobbiesFetched callback);
 
 } // namespace pong

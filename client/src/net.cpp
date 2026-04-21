@@ -214,7 +214,7 @@ void start_as_host() {
             }
         };
 
-        t->host(url);
+        t->host(url, g_app.username_edit.text);
         g_pending_transports.push_back(std::move(t));
     }
 }
@@ -415,4 +415,25 @@ void process_pending_server_list() {
     }
 #endif
     // (In WASM, ccall executes on the main thread automatically, so no queue check is needed here)
+}
+
+std::mutex g_lobby_mutex;
+
+void refresh_lobby_list() {
+    if (g_app.server_list.empty()) g_app.server_list.push_back(g_app.signaling_edit.text);
+
+    // Clear the current list immediately so the UI shows it's refreshing
+    {
+        std::lock_guard<std::mutex> lk(g_lobby_mutex);
+        g_app.lobby_list.clear();
+    }
+
+    // Ping all servers in your fallback list
+    for (const std::string& url : g_app.server_list) {
+        pong::fetch_lobbies(url, [](const std::vector<pong::LobbyInfo>& lobbies) {
+            // Safely update the global app state
+            std::lock_guard<std::mutex> lk(g_lobby_mutex);
+            g_app.lobby_list = lobbies;
+        });
+    }
 }

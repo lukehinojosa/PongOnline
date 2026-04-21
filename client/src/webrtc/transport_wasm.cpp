@@ -6,18 +6,21 @@
 #include <emscripten/val.h>
 #include <memory>
 #include <vector>
+#include <unordered_map>
+#include <nlohmann/json.hpp>
 
 // JS bridge
-EM_JS(void, js_transport_host, (int id, const char* signaling_url), {
+EM_JS(void, js_transport_host, (int id, const char* signaling_url, const char* username), {
     if (!window._pongSockets) window._pongSockets = {};
     const url = UTF8ToString(signaling_url);
+    const uname = UTF8ToString(username);
 
     const ws = new WebSocket(url);
     window._pongSockets[id] = ws; // Store uniquely by C++ pointer ID
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
-        ws.send(JSON.stringify({ type: 'host' }));
+        ws.send(JSON.stringify({ type: 'host', username: uname }));
     };
     ws.onerror = (e) => console.error('[pong] host WS error on', url);
     ws.onclose = (e) => {
@@ -98,6 +101,24 @@ EM_JS(void, js_transport_close, (int id), {
     }
 });
 
+EM_JS(void, js_fetch_lobbies, (int cb_id, const char* signaling_url), {
+    const url = UTF8ToString(signaling_url);
+    const ws = new WebSocket(url);
+    ws.onopen = () => { ws.send(JSON.stringify({ type: 'list' })); };
+    ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'list') {
+            Module.ccall('wasm_on_lobbies_fetched', 'void', ['number', 'string'], [cb_id, JSON.stringify(msg.lobbies)]);
+            ws.close();
+        }
+    };
+    ws.onerror = (e) => ws.close();
+});
+
+// Global state for mapping temporary fetch requests
+static std::unordered_map<int, pong::OnLobbiesFetched> g_lobby_cbs;
+static int g_cb_id = 0;
+
 // C++ callbacks invoked from JS
 extern "C" {
     EMSCRIPTEN_KEEPALIVE void wasm_on_open(int id) {
@@ -116,6 +137,20 @@ extern "C" {
         auto* t = reinterpret_cast<pong::Transport*>(id);
         if (t && t->on_lobby_code) t->on_lobby_code(code);
     }
+    EMSCRIPTEN_KEEPALIVE void wasm_on_lobbies_fetched(int cb_id, const char* json_str) {
+        auto it = g_lobby_cbs.find(cb_id);
+        if (it != g_lobby_cbs.end()) {
+            std::vector<pong::LobbyInfo> result;
+            try {
+                auto j = nlohmann::json::parse(json_str);
+                for (const auto& l : j) {
+                    result.push_back({l.value("code", ""), l.value("host", ""), l.value("players", 1)});
+                }
+            } catch(...) {}
+            it->second(result);
+            g_lobby_cbs.erase(it);
+        }
+    }
 }
 
 // WasmTransport Class
@@ -128,8 +163,8 @@ public:
     // Automatically kill the JS socket when C++ destroys this object
     ~WasmTransport() { close(); }
 
-    void host(const std::string& signaling_url) override {
-        js_transport_host(reinterpret_cast<int>(this), signaling_url.c_str());
+    void host(const std::string& signaling_url, const std::string& username) override {
+        js_transport_host(reinterpret_cast<int>(this), signaling_url.c_str(), username.c_str());
     }
     void join(const std::string& signaling_url, const std::string& code) override {
         js_transport_join(reinterpret_cast<int>(this), signaling_url.c_str(), code.c_str());
@@ -147,6 +182,12 @@ public:
 
 std::unique_ptr<Transport> make_transport() {
     return std::make_unique<WasmTransport>();
+}
+
+void fetch_lobbies(const std::string& signaling_url, OnLobbiesFetched callback) {
+    int id = ++g_cb_id;
+    g_lobby_cbs[id] = std::move(callback);
+    js_fetch_lobbies(id, signaling_url.c_str());
 }
 
 } // namespace pong

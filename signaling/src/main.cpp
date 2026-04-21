@@ -102,6 +102,8 @@ static void start_cloudflared_tunnel(int port) {
 
 struct Lobby {
     std::shared_ptr<rtc::WebSocket> host_ws;
+    std::string host_username;
+    int player_count = 1;
 };
 
 // Once two clients are paired, each entry maps a WebSocket to its relay partner.
@@ -164,10 +166,14 @@ static void handle_client(std::shared_ptr<rtc::WebSocket> ws) {
 
         if (type == "host") {
             std::string code;
+            // Extract the username, default to "Unknown" if not provided
+            std::string username = msg.value("username", "Unknown");
             {
                 std::lock_guard lk(g_mutex);
                 do { code = make_code(); } while (g_lobbies.count(code));
                 g_lobbies[code].host_ws = ws;
+                g_lobbies[code].host_username = username;
+                g_lobbies[code].player_count = 1;
                 g_pending.erase(ws); // Remove from pending, now owned by g_lobbies
             }
             ws->send(nlohmann::json{ {"type","code"}, {"code", code} }.dump());
@@ -183,13 +189,39 @@ static void handle_client(std::shared_ptr<rtc::WebSocket> ws) {
                     ws->close();
                     return;
                 }
+                // Prevent joining if the lobby is already full
+                if (it->second.player_count >= 2) {
+                    ws->send(nlohmann::json{{"type","error"},{"msg","lobby full"}}.dump());
+                    ws->close();
+                    return;
+                }
+
                 host_ws = it->second.host_ws;
+                it->second.player_count = 2; // Mark lobby as full
+
                 g_relay[host_ws.get()] = ws;
                 g_relay[ws.get()]      = host_ws;
                 g_pending.erase(ws); // Remove from pending, now owned by g_relay
             }
             host_ws->send(nlohmann::json{{"type","guest_ready"}}.dump());
             ws->send(nlohmann::json{{"type","ready"}}.dump());
+        }
+        else if (type == "list") {
+            nlohmann::json arr = nlohmann::json::array();
+            {
+                std::lock_guard lk(g_mutex);
+                for (const auto& [code, lobby] : g_lobbies) {
+                    arr.push_back({
+                        {"code", code},
+                        {"host", lobby.host_username},
+                        {"players", lobby.player_count}
+                    });
+                }
+            }
+            ws->send(nlohmann::json{
+                {"type", "list"},
+                {"lobbies", arr}
+            }.dump());
         }
         else if (type == "keepalive") {
             // ECHO the packet back

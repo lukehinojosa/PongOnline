@@ -37,6 +37,7 @@ struct App {
     uint32_t current_seed = 0;
 
     std::string lobby_code;
+    std::vector<pong::LobbyInfo> lobby_list;
     bool peer_connected = false;
     bool connecting = false;
     bool game_over = false;

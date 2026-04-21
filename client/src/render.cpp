@@ -149,12 +149,14 @@ void draw_game(const RenderState& rs) {
 
 void draw_lobby() {
     ClearBackground(BLACK);
-
     if (g_app.role == pong::Role::None) {
         DrawText("ONLINE PONG", SCREEN_W / 2 - 120, 180, 40, GREEN);
         if (draw_button("Host a Game", SCREEN_W / 2 - 100, 270, 200, 40)) start_as_host();
-        if (draw_button("Join a Game", SCREEN_W / 2 - 100, 330, 200, 40))
+
+        if (draw_button("Join a Game", SCREEN_W / 2 - 100, 330, 200, 40)) {
             g_app.role = pong::Role::Guest;
+            refresh_lobby_list(); // Fetch data from the signaling server
+        }
 
         // Username
         DrawText("Username:", (int)USERNAME_BOX.x, 16, 18, GRAY);
@@ -185,9 +187,54 @@ void draw_lobby() {
             if (g_app.connecting) {
                 DrawText("Connecting...", 270, 260, 32, YELLOW);
             } else {
-                DrawText("Enter lobby code:", 220, 200, 28, WHITE);
-                draw_code_edit(g_app.join_code_edit, {280, 260}, 40, 2, GREEN);
-                DrawText("Press ENTER to join", 240, 330, 20, GRAY);
+                // Lobby List Panel
+                int list_x = 100;
+                int list_y = 100;
+                int list_w = 600;
+                int list_h = 240;
+
+                // Background & Header
+                DrawRectangle(list_x, list_y, list_w, list_h, Color{30, 30, 30, 255});
+                DrawRectangleLines(list_x, list_y, list_w, list_h, GRAY);
+                DrawText("Available Lobbies", list_x + 10, list_y + 10, 20, LIGHTGRAY);
+
+                // Refresh Button
+                if (draw_button("Refresh", list_x + list_w - 105, list_y + 5, 100, 25)) {
+                    refresh_lobby_list();
+                }
+
+                // List Items
+                int item_y = list_y + 40;
+                for (const auto& lobby : g_app.lobby_list) {
+                    Rectangle item_rec = { (float)list_x + 10, (float)item_y, (float)list_w - 20, 35 };
+                    bool is_full = (lobby.player_count >= 2);
+                    bool hovered = CheckCollisionPointRec(GetMousePosition(), item_rec);
+
+                    // Click & Hover Logic if not full
+                    if (hovered && !is_full) {
+                        DrawRectangleRec(item_rec, Color{60, 60, 60, 255});
+                        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                            g_app.join_code_edit.text = lobby.code;
+                        }
+                    }
+
+                    Color text_color = is_full ? DARKGRAY : WHITE;
+
+                    // Left-aligned Username
+                    DrawText(TextFormat("%s's Lobby", lobby.host_username.c_str()), list_x + 20, item_y + 8, 20, text_color);
+
+                    // Right-aligned Player Count
+                    const char* count_str = TextFormat("%d/2", lobby.player_count);
+                    int count_w = MeasureText(count_str, 20);
+                    DrawText(count_str, list_x + list_w - 20 - count_w, item_y + 8, 20, text_color);
+
+                    item_y += 40;
+                }
+
+                // Manual Entry Section
+                DrawText("Enter lobby code:", 220, 380, 28, WHITE);
+                draw_code_edit(g_app.join_code_edit, {280, 430}, 40, 2, GREEN);
+                DrawText("Press ENTER to join", 240, 500, 20, GRAY);
             }
         }
     }

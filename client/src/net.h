@@ -8,3 +8,4 @@ void game_tick();
 void load_server_list(const std::string& raw_pastebin_text);
 void fetch_and_load_servers(const std::string& url);
 void process_pending_server_list();
+void refresh_lobby_list();

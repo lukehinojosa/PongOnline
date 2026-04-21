@@ -8,15 +8,19 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <mutex>
+#include <vector>
+#include <algorithm>
 
 namespace pong {
 
 // Relay transport
 class NativeTransport : public Transport {
 public:
-    void host(const std::string& signaling_url) override {
-        open_ws(signaling_url, [this]() {
-            ws_->send(R"({"type":"host"})");
+    void host(const std::string& signaling_url, const std::string& username) override {
+        open_ws(signaling_url, [this, username]() {
+            nlohmann::json msg = { {"type", "host"}, {"username", username} };
+            ws_->send(msg.dump());
         });
     }
 
@@ -103,6 +107,53 @@ private:
 
 std::unique_ptr<Transport> make_transport() {
     return std::make_unique<NativeTransport>();
+}
+
+// Global store to keep temporary fetch sockets alive until they finish
+static std::mutex g_temp_ws_mtx;
+static std::vector<std::shared_ptr<rtc::WebSocket>> g_temp_sockets;
+
+void fetch_lobbies(const std::string& url, OnLobbiesFetched callback) {
+    auto ws = std::make_shared<rtc::WebSocket>();
+
+    {
+        std::lock_guard lk(g_temp_ws_mtx);
+        g_temp_sockets.push_back(ws);
+    }
+
+    ws->onOpen([ws_ptr = ws.get()]() {
+        ws_ptr->send(R"({"type":"list"})");
+    });
+
+    ws->onMessage([ws_ptr = ws.get(), callback](rtc::message_variant data) {
+        if (std::holds_alternative<std::string>(data)) {
+            try {
+                auto j = nlohmann::json::parse(std::get<std::string>(data));
+                if (j.value("type", "") == "list") {
+                    std::vector<LobbyInfo> result;
+                    for (const auto& l : j["lobbies"]) {
+                        result.push_back({
+                            l.value("code", ""),
+                            l.value("host", ""),
+                            l.value("players", 1)
+                        });
+                    }
+                    callback(result);
+                    ws_ptr->close();
+                }
+            } catch (...) {}
+        }
+    });
+
+    ws->onClosed([ws]() {
+        std::lock_guard lk(g_temp_ws_mtx);
+        g_temp_sockets.erase(
+            std::remove(g_temp_sockets.begin(), g_temp_sockets.end(), ws),
+            g_temp_sockets.end()
+        );
+    });
+
+    ws->open(url);
 }
 
 } // namespace pong
