@@ -35,6 +35,12 @@ public:
         ws_->send(std::move(bin));
     }
 
+    void send_signaling_keepalive() override {
+        if (ws_ && ws_->readyState() == rtc::WebSocket::State::Open) {
+            ws_->send(R"({"type":"keepalive"})");
+        }
+    }
+
     void close() override {
         if (ws_) ws_->close();
     }
@@ -64,6 +70,9 @@ private:
             catch (...) { return; }
 
             const std::string type = j.value("type", "");
+
+            if (type == "keepalive") return;
+
             std::cout << "[transport] signaling rx: " << type << "\n";
 
             if (type == "code") {

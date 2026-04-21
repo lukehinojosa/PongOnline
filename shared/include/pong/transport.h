@@ -33,6 +33,9 @@ struct Transport {
     // Send raw bytes to the peer. Call only after on_open fires.
     virtual void send(std::span<const uint8_t> data) = 0;
 
+    // Keep alive while waiting for guest to arrive
+    virtual void send_signaling_keepalive() = 0;
+
     // Convenience: send any packed struct directly.
     template<typename T>
     void send_msg(const T& msg) {

@@ -11,6 +11,8 @@
 #include "raylib.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdarg>
 
 #ifdef PONG_WASM
 #  include <emscripten/emscripten.h>
@@ -22,8 +24,19 @@ extern "C" {
 }
 #endif
 
+// Custom logger that filters out Raylib's internal INFO spam
+void CustomLogCallback(int logLevel, const char *text, va_list args) {
+    // Only print Warnings, Errors, OR custom app logs that start with '['
+    if (logLevel >= LOG_WARNING || text[0] == '[') {
+        vprintf(text, args);
+        printf("\n");
+    }
+}
+
 // Main loop
 static void main_loop() {
+    process_pending_server_list();
+
     static constexpr double TICK_MS = 1000.0 / TICK_HZ;
     static constexpr double MAX_DELTA_MS = 200.0;
     static constexpr int MAX_TICKS_FRAME = 4;
@@ -46,6 +59,19 @@ static void main_loop() {
     double delta = std::min(now - g_app.last_frame_ms, MAX_DELTA_MS);
     g_app.last_frame_ms = now;
 
+    static double last_signaling_ping_ms = 0.0;
+    // The Signaling Heartbeat; Needed when connected to the lobby but waiting for a peer
+    if (g_app.role == pong::Role::Host && !g_app.lobby_code.empty() && !g_app.peer_connected) {
+        if (now - last_signaling_ping_ms > 2000.0) { // Send every 2 seconds
+            last_signaling_ping_ms = now;
+
+            if (g_app.transport) {
+                // Send a ping
+                g_app.transport->send_signaling_keepalive();
+            }
+        }
+    }
+
 #ifndef PONG_WASM
     if (IsKeyPressed(KEY_F11)) {
         if (!IsWindowFullscreen()) {
@@ -61,8 +87,14 @@ static void main_loop() {
         // Main menu; username and server fields.
         if (update_text_edit(g_app.username_edit, USERNAME_BOX, 16, pong::USERNAME_MAX_LEN))
             storage_set("username", g_app.username_edit.text.c_str());
-        if (update_text_edit(g_app.signaling_edit, SIGNALING_BOX, 14, 127))
-            storage_set("signaling_url", g_app.signaling_edit.text.c_str());
+
+        // Only update signaling edit if the dev menu is visible
+        if (g_app.show_dev_menu) {
+            if (update_text_edit(g_app.signaling_edit, SIGNALING_BOX, 14, 127))
+                storage_set("signaling_url", g_app.signaling_edit.text.c_str());
+        } else {
+            g_app.signaling_edit.focused = false; // Unfocuses when hidden
+        }
         if (IsKeyPressed(KEY_ESCAPE)) {
             g_app.username_edit.focused = false;
             g_app.signaling_edit.focused = false;
@@ -319,6 +351,8 @@ static void main_loop() {
 
 // Entry point
 int main() {
+    SetTraceLogCallback(CustomLogCallback);
+
     // Load persisted settings before opening the window.
     std::string saved_username = storage_get("username", "");
     std::string saved_url = storage_get("signaling_url", "ws://localhost:9000");
@@ -340,6 +374,8 @@ int main() {
 
     g_app.username_edit.text = saved_username;
     g_app.signaling_edit.text = saved_url;
+
+    fetch_and_load_servers("https://gist.githubusercontent.com/lukehinojosa/582d21a38f95f97a87013e901f4943d6/raw/gistfile1.txt");
 
 #ifdef PONG_WASM
     emscripten_set_main_loop(main_loop, 0, 1);

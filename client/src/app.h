@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 struct Snapshot {
     pong::QuantState state;
@@ -40,6 +41,7 @@ struct App {
     bool connecting = false;
     bool game_over = false;
     bool show_menu = false;
+    bool show_dev_menu = false;
     bool host_closed = false;
     bool game_started = false;
     bool guest_ready = false;
@@ -88,6 +90,10 @@ struct App {
         uint8_t side = 0;
         int frames_left = 0;
     } auth_resend;
+
+    // Server list fallback state
+    std::vector<std::string> server_list;
+    size_t current_server_idx = 0;
 };
 
 extern App g_app;

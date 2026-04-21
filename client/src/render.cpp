@@ -160,10 +160,16 @@ void draw_lobby() {
         DrawText("Username:", (int)USERNAME_BOX.x, 16, 18, GRAY);
         draw_text_edit(g_app.username_edit, USERNAME_BOX, 16);
 
-        // Signaling server
-        DrawText("Server:", (int)SIGNALING_BOX.x, 76, 18, GRAY);
-        draw_text_edit(g_app.signaling_edit, SIGNALING_BOX, 14);
+        // Conditionally draw signaling server
+        if (g_app.show_dev_menu) {
+            DrawText("Server:", (int)SIGNALING_BOX.x, 76, 18, GRAY);
+            draw_text_edit(g_app.signaling_edit, SIGNALING_BOX, 14);
+        }
 
+        // Dev Toggle Button in the bottom left
+        if (draw_button("Dev", 20, SCREEN_H - 60, 80, 40)) {
+            g_app.show_dev_menu = !g_app.show_dev_menu;
+        }
     } else {
         if (draw_button("< Back", 20, 20, 100, 40)) { reset_app(); return; }
 

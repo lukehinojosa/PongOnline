@@ -191,6 +191,11 @@ static void handle_client(std::shared_ptr<rtc::WebSocket> ws) {
             host_ws->send(nlohmann::json{{"type","guest_ready"}}.dump());
             ws->send(nlohmann::json{{"type","ready"}}.dump());
         }
+        else if (type == "keepalive") {
+            // ECHO the packet back
+            ws->send(raw);
+            return;
+        }
     });
 
     ws->onClosed([weak_ws]() {
