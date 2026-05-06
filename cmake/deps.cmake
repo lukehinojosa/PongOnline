@@ -35,6 +35,8 @@ set(MBEDTLS_LIBRARIES  mbedtls mbedx509 mbedcrypto CACHE STRING "" FORCE)
 if(NOT EMSCRIPTEN)
     set(USE_MBEDTLS ON CACHE BOOL "" FORCE)
     set(NO_MEDIA    ON CACHE BOOL "" FORCE)
+    set(NO_TESTS    ON CACHE BOOL "" FORCE)
+    set(NO_EXAMPLES ON CACHE BOOL "" FORCE)
 
     FetchContent_Declare(libdatachannel
             GIT_REPOSITORY    https://github.com/paullouisageneau/libdatachannel.git
