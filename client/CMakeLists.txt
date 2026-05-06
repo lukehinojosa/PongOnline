@@ -19,6 +19,9 @@ target_link_libraries(pong_client PRIVATE
 if(NOT EMSCRIPTEN)
     target_link_libraries(pong_client PRIVATE
             datachannel-static
+            mbedtls
+            mbedx509
+            mbedcrypto
             asio::asio
     )
     target_compile_definitions(pong_client PRIVATE PONG_NATIVE)
