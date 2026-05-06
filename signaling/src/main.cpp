@@ -1,5 +1,6 @@
 #include <nlohmann/json.hpp>
 #include <rtc/rtc.hpp>
+#include <asio.hpp>
 
 #include <fstream>
 #include <iostream>
@@ -270,7 +271,21 @@ int main() {
         handle_client(ws);
     });
 
-    std::cout << "[signaling] Listening. Press ENTER to stop.\n";
-    std::cin.get();
+    std::cout << "[signaling] Listening. Waiting for termination signal...\n";
+
+    // Setup Asio to block the main thread and catch OS signals
+    asio::io_context ioc;
+    asio::signal_set signals(ioc, SIGINT, SIGTERM);
+
+    signals.async_wait([&](const std::error_code& error, int signal_number) {
+        if (!error) {
+            std::cout << "\n[signaling] Received signal " << signal_number << ", shutting down.\n";
+            server->stop();
+        }
+    });
+
+    // This blocks indefinitely until a signal is received
+    ioc.run();
+
     return 0;
 }

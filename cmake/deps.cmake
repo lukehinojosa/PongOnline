@@ -80,12 +80,14 @@ if(NOT TARGET nlohmann_json::nlohmann_json)
 endif()
 
 # ── 6. Raylib ────────────────────────────────────────────────
-FetchContent_Declare(raylib
-        GIT_REPOSITORY https://github.com/raysan5/raylib.git
-        GIT_TAG        5.5
-        GIT_SHALLOW    FALSE
-)
-FetchContent_MakeAvailable(raylib)
+if(BUILD_CLIENT)
+    FetchContent_Declare(raylib
+            GIT_REPOSITORY https://github.com/raysan5/raylib.git
+            GIT_TAG        5.5
+            GIT_SHALLOW    FALSE
+    )
+    FetchContent_MakeAvailable(raylib)
+endif()
 
 # ── 7. Standalone Asio ───────────────────────────────────────
 FetchContent_Declare(asio
@@ -99,8 +101,10 @@ if(NOT TARGET asio::asio)
     add_library(asio INTERFACE)
     add_library(asio::asio ALIAS asio)
     target_include_directories(asio INTERFACE "${asio_SOURCE_DIR}/asio/include")
-    target_compile_definitions(asio INTERFACE ASIO_STANDALONE _WIN32_WINNT=0x0A00)
+    target_compile_definitions(asio INTERFACE ASIO_STANDALONE)
+
     if(WIN32)
+        target_compile_definitions(asio INTERFACE _WIN32_WINNT=0x0A00)
         target_link_libraries(asio INTERFACE ws2_32 mswsock)
     endif()
 endif()

@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.10...4.0)
 project(OnlinePong VERSION 0.1.0 LANGUAGES C CXX)
 
+option(BUILD_CLIENT "Build the desktop/WASM client" ON)
+
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_POLICY_DEFAULT_CMP0127 NEW)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.10)
 set(CMAKE_CXX_STANDARD 20)
@@ -18,7 +21,10 @@ endif()
 include(cmake/deps.cmake)
 
 add_subdirectory(shared)
-add_subdirectory(client)
+
+if(BUILD_CLIENT)
+    add_subdirectory(client)
+endif()
 
 # Signaling server is native-only — just brokers WebRTC handshakes
 if(NOT EMSCRIPTEN)

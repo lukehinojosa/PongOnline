@@ -5,6 +5,9 @@ add_executable(pong_signaling
 target_link_libraries(pong_signaling PRIVATE
     pong::shared
     datachannel-static
+    mbedtls
+    mbedx509
+    mbedcrypto
     asio::asio
     nlohmann_json::nlohmann_json
 )
