@@ -1,0 +1,58 @@
+app-id: com.onlinepong.Client
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: pong_client
+finish-args:
+  # Graphics and Input
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --share=ipc
+  # Audio (Raylib)
+  - --socket=pulseaudio
+  # Network (WebRTC / Gameplay)
+  - --share=network
+modules:
+  - name: onlinepong
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DBUILD_CLIENT=ON
+      # Flathub Compliance
+      - -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+      - -DFETCHCONTENT_SOURCE_DIR_MBEDTLS=flatpak-deps/mbedtls
+      - -DFETCHCONTENT_SOURCE_DIR_LIBDATACHANNEL=flatpak-deps/libdatachannel
+      - -DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=flatpak-deps/nlohmann_json
+      - -DFETCHCONTENT_SOURCE_DIR_RAYLIB=flatpak-deps/raylib
+      - -DFETCHCONTENT_SOURCE_DIR_ASIO=flatpak-deps/asio
+    sources:
+      # Local project code
+      - type: dir
+        path: .
+
+      # Pre-download all Git dependencies
+      - type: git
+        url: https://github.com/Mbed-TLS/mbedtls.git
+        tag: v3.6.2
+        dest: flatpak-deps/mbedtls
+
+      - type: git
+        url: https://github.com/paullouisageneau/libdatachannel.git
+        tag: v0.24.1
+        dest: flatpak-deps/libdatachannel
+
+      - type: git
+        url: https://github.com/nlohmann/json.git
+        tag: v3.12.0
+        dest: flatpak-deps/nlohmann_json
+
+      - type: git
+        url: https://github.com/raysan5/raylib.git
+        tag: '5.5'
+        dest: flatpak-deps/raylib
+
+      - type: git
+        url: https://github.com/chriskohlhoff/asio.git
+        tag: asio-1-30-2
+        dest: flatpak-deps/asio

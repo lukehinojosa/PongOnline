@@ -30,6 +30,11 @@ if(NOT EMSCRIPTEN)
         "$<TARGET_FILE_DIR:pong_client>/Assets"
         COMMENT "Copying Assets directory to build output..."
     )
+
+    # Install the executable to /app/bin
+    install(TARGETS pong_client DESTINATION bin)
+    # Install the Assets directory next to the executable
+    install(DIRECTORY "${CMAKE_SOURCE_DIR}/Assets" DESTINATION bin)
 endif()
 
 # ── WASM build ───────────────────────────────────────────────
