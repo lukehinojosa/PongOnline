@@ -56,14 +56,14 @@ static void start_cloudflared_tunnel(int port) {
 
     if (!std::ifstream(cloudflared_path).good()) {
         std::cout << "[tunnel] cloudflared not found — skipping WSS tunnel\n"
-                  << "[tunnel] clients must use ws://<your-ip>:" << port << " directly\n";
+                  << "[tunnel] clients must use ws://<your-ip>:" << port << " directly" << std::endl;
         return;
     }
 
     std::string cmd = "\"" + cloudflared_path + "\" tunnel --url http://localhost:"
                     + std::to_string(port) + " --no-autoupdate 2>&1";
 
-    std::cout << "[tunnel] starting cloudflared quick tunnel...\n";
+    std::cout << "[tunnel] starting cloudflared quick tunnel..." << std::endl;
 
     std::thread([cmd]() {
 #ifdef _WIN32
@@ -72,7 +72,7 @@ static void start_cloudflared_tunnel(int port) {
         FILE* pipe = popen(cmd.c_str(), "r");
 #endif
         if (!pipe) {
-            std::cerr << "[tunnel] failed to spawn cloudflared\n";
+            std::cerr << "[tunnel] failed to spawn cloudflared" << std::endl;
             return;
         }
 
@@ -88,7 +88,7 @@ static void start_cloudflared_tunnel(int port) {
                           << "[tunnel]  WSS URL: " << wss_url << "\n"
                           << "[tunnel]  Enter this in the game's signaling field\n"
                           << "[tunnel] ============================================\n\n"
-                          << std::flush;
+                          << std::endl;
             }
         }
 #ifdef _WIN32
@@ -258,7 +258,7 @@ static void handle_client(std::shared_ptr<rtc::WebSocket> ws) {
 }
 
 int main() {
-    std::cout << "[signaling] Schrödinger's Pong signaling server starting on port 9000\n";
+    std::cout << "[signaling] Schrödinger's Pong signaling server starting on port 9000" << std::endl;
 
     start_cloudflared_tunnel(9000);
 
@@ -267,11 +267,11 @@ int main() {
 
     auto server = std::make_shared<rtc::WebSocketServer>(cfg);
     server->onClient([](std::shared_ptr<rtc::WebSocket> ws) {
-        std::cout << "[signaling] client connected: " << ws.get() << "\n";
+        std::cout << "[signaling] client connected: " << ws.get() << std::endl;
         handle_client(ws);
     });
 
-    std::cout << "[signaling] Listening. Waiting for termination signal...\n";
+    std::cout << "[signaling] Listening. Waiting for termination signal..." << std::endl;
 
     // Setup Asio to block the main thread and catch OS signals
     asio::io_context ioc;
@@ -279,7 +279,7 @@ int main() {
 
     signals.async_wait([&](const std::error_code& error, int signal_number) {
         if (!error) {
-            std::cout << "\n[signaling] Received signal " << signal_number << ", shutting down.\n";
+            std::cout << "\n[signaling] Received signal " << signal_number << ", shutting down." << std::endl;
             server->stop();
         }
     });

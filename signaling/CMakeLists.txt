@@ -22,13 +22,31 @@ endif()
 # Fetches the cloudflared binary and places it next to pong_signaling so the
 # server can spawn a trycloudflare.com quick tunnel on startup (no account needed).
 if(WIN32)
-    set(_CF_URL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe")
+    # Detect if targeting Windows Arm64
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+        set(_CF_URL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-arm64.exe")
+    else()
+        set(_CF_URL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe")
+    endif()
     set(_CF_BIN "cloudflared.exe")
 elseif(APPLE)
-    set(_CF_URL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-amd64")
+    # Detect if on Apple Silicon (M1+) or Intel
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        set(_CF_URL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-arm64")
+    else()
+        set(_CF_URL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-amd64")
+    endif()
     set(_CF_BIN "cloudflared")
 else()
-    set(_CF_URL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64")
+    # Detect the architecture on Linux
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+        set(_CF_URL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm")
+        set(_CF_URL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm")
+    else()
+        set(_CF_URL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64")
+    endif()
+
     set(_CF_BIN "cloudflared")
 endif()
 
