@@ -265,6 +265,19 @@ int main() {
     rtc::WebSocketServer::Configuration cfg;
     cfg.port = 9000;
 
+    const char* tls_cert = std::getenv("TLS_CERT");
+    const char* tls_key  = std::getenv("TLS_KEY");
+    if (tls_cert && tls_key) {
+        cfg.enableTls = true;
+        cfg.certificatePemFile = tls_cert;
+        cfg.keyPemFile = tls_key;
+        std::cout << "[signaling] TLS enabled — wss:// on port 9000\n";
+        std::cout << "[signaling]   cert: " << tls_cert << "\n";
+        std::cout << "[signaling]   key:  " << tls_key  << "\n";
+    } else {
+        std::cout << "[signaling] No TLS_CERT/TLS_KEY set — plain ws:// on port 9000\n";
+    }
+
     auto server = std::make_shared<rtc::WebSocketServer>(cfg);
     server->onClient([](std::shared_ptr<rtc::WebSocket> ws) {
         std::cout << "[signaling] client connected: " << ws.get() << std::endl;
