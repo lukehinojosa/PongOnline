@@ -96,8 +96,12 @@ EM_JS(void, js_transport_keepalive, (int id), {
 
 EM_JS(void, js_transport_close, (int id), {
     if (window._pongSockets && window._pongSockets[id]) {
-        window._pongSockets[id].close();
-        delete window._pongSockets[id]; // Cleanup JS memory
+        const ws = window._pongSockets[id];
+        ws.onclose = null;   // prevent async callback firing into freed C++ memory
+        ws.onmessage = null;
+        ws.onopen = null;
+        ws.close();
+        delete window._pongSockets[id];
     }
 });
 
